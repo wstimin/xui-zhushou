@@ -81,7 +81,7 @@ curl -s http://127.0.0.1:1888/api/health
 
 ## 远端构建与发布
 
-推送到 `main` 后，GitHub Actions 会自动执行测试、类型检查、安装脚本语法检查、生产构建与构建包校验，并把构建包保存为工作流产物。推送与 `package.json` 版本一致的标签（例如 `v2.0.0`）时，会自动创建 GitHub Release，发布以下文件：
+每次推送到 `main` 前，必须同时递增 `package.json` 与 `package-lock.json` 的版本。GitHub Actions 会拒绝已经存在对应版本标签的提交；新版本通过测试、类型检查、安装脚本语法检查、生产构建与构建包校验后，会自动创建版本标签和 GitHub Release，并发布以下文件：
 
 ```text
 xui-zhushou-linux-v2.0.0.tar.gz
@@ -91,7 +91,7 @@ release-manifest.json
 adapter-catalog.json
 ```
 
-一键安装脚本固定下载 `releases/latest/download/xui-zhushou-linux.tar.gz`，后台在线更新还会验证 `release-manifest.json` 的 Ed25519 签名以及更新包 SHA-256。新标签发布完成后，服务器可在管理后台查看真实下载、切换、重启、健康检查或自动回滚状态。
+一键安装脚本固定下载 `releases/latest/download/xui-zhushou-linux.tar.gz`，后台在线更新还会验证 `release-manifest.json` 的 Ed25519 签名以及更新包 SHA-256。新版本发布完成后，服务器可在管理后台查看真实下载、切换、重启、健康检查或自动回滚状态。
 
 ## 3x-ui 安装脚本
 
