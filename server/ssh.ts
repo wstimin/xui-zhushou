@@ -305,6 +305,7 @@ export async function inspectServer(
     "printf '__ARCH__='; uname -m",
     "printf '__SYSTEMD_ACTIVE__='; if [ \"$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ')\" = systemd ] && [ -d /run/systemd/system ]; then echo yes; else echo no; fi",
     "printf '__RAM_KB__='; awk '/MemTotal/{print $2}' /proc/meminfo",
+    "printf '__FREE_KB__='; awk '/MemAvailable/{print $2}' /proc/meminfo",
     "printf '__DISK_FREE_KB__='; df -Pk / 2>/dev/null | awk 'NR==2 {print $4}'",
     "printf '__UID__='; id -u",
     "printf '__CURL__='; command -v curl >/dev/null && echo yes || echo no",

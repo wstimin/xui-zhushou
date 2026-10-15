@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "product": "PanelArk-Adapters",
+  "version": "2.1.0",
+  "entries": [
+    { "id": "3x-ui", "enabled": true, "sortOrder": 0 },
+    { "id": "s-ui", "enabled": true, "sortOrder": 10 },
+    { "id": "marzban", "enabled": true, "sortOrder": 20 },
+    { "id": "hiddify", "enabled": true, "sortOrder": 30 },
+    { "id": "1panel", "enabled": true, "sortOrder": 40 },
+    { "id": "aapanel", "enabled": true, "sortOrder": 50 },
+    { "id": "casaos", "enabled": true, "sortOrder": 60 },
+    { "id": "portainer", "enabled": true, "sortOrder": 70 },
+    { "id": "npm", "enabled": true, "sortOrder": 80 },
+    { "id": "nezha", "enabled": true, "sortOrder": 90 },
+    { "id": "uptime-kuma", "enabled": true, "sortOrder": 100 },
+    { "id": "docker", "enabled": true, "sortOrder": 110 },
+    { "id": "nginx", "enabled": true, "sortOrder": 120 },
+    { "id": "fail2ban", "enabled": true, "sortOrder": 130 },
+    { "id": "bbr", "enabled": true, "sortOrder": 140 },
+    { "id": "swap", "enabled": true, "sortOrder": 150 },
+    { "id": "certbot", "enabled": true, "sortOrder": 160 }
+  ]
+}

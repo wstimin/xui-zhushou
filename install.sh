@@ -21,6 +21,7 @@ RELEASE_CHECKSUM_URL="${RELEASE_CHECKSUM_URL:-https://github.com/wstimin/xui-zhu
 TARGET_DIR="/opt/3xui-deploy-assistant"
 APP_NAME="3xui-deploy-assistant"
 SSL_DIR="/etc/3xui-assistant/ssl"
+PANELARK_STATE_DIR="/var/lib/panelark"
 DEFAULT_PORT="1888"
 APP_PORT="${PORT:-$DEFAULT_PORT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -341,7 +342,7 @@ install_assistant() {
 
   echo -e "${BLUE}[4/5] 安装生产运行依赖并切换到新构建包...${NC}"
   cd "$DOWNLOADED_PACKAGE_DIR"
-  npm ci --omit=dev
+  npm ci --omit=dev --ignore-scripts
 
   if ! command -v pm2 &> /dev/null; then
     echo -e "${YELLOW}正在全局安装 PM2 进程管理器...${NC}"
@@ -355,6 +356,28 @@ install_assistant() {
     cp "$DOWNLOADED_PACKAGE_DIR/.env.example" "$DOWNLOADED_PACKAGE_DIR/.env"
     chmod 600 "$DOWNLOADED_PACKAGE_DIR/.env"
     echo -e "${GREEN}[OK] 已创建 .env 配置文件。${NC}"
+  fi
+
+  # PanelArk business data must live outside the replaceable release directory.
+  # Older installations are migrated once from TARGET_DIR/data.
+  existing_panelark_data_dir=$(sed -n 's/^PANELARK_DATA_DIR=//p' "$DOWNLOADED_PACKAGE_DIR/.env" | tail -n1)
+  if [ -z "$existing_panelark_data_dir" ]; then
+    if grep -q '^PANELARK_DATA_DIR=' "$DOWNLOADED_PACKAGE_DIR/.env"; then
+      sed -i "s|^PANELARK_DATA_DIR=.*|PANELARK_DATA_DIR=${PANELARK_STATE_DIR}|" "$DOWNLOADED_PACKAGE_DIR/.env"
+    else
+      printf '\nPANELARK_DATA_DIR=%s\n' "$PANELARK_STATE_DIR" >> "$DOWNLOADED_PACKAGE_DIR/.env"
+    fi
+    existing_panelark_data_dir="$PANELARK_STATE_DIR"
+  fi
+  if [ "$existing_panelark_data_dir" = "$PANELARK_STATE_DIR" ]; then
+    mkdir -p "$PANELARK_STATE_DIR"
+    chmod 700 "$PANELARK_STATE_DIR"
+    if [ -d "$TARGET_DIR/data" ]; then
+      cp -a "$TARGET_DIR/data/." "$PANELARK_STATE_DIR/"
+      echo -e "${GREEN}[OK] PanelArk 数据已迁移并保留在 ${PANELARK_STATE_DIR}。${NC}"
+    fi
+  else
+    echo -e "${GREEN}[OK] 已保留自定义 PanelArk 数据目录: ${existing_panelark_data_dir}${NC}"
   fi
 
   BACKUP_DIR="${TARGET_DIR}.previous"
@@ -372,7 +395,7 @@ install_assistant() {
   APP_VERSION=$(read_installed_version)
   export APP_VERSION
 
-  # 更新只替换应用构建包；.env 与 /etc 下的 SSL 证书保持不变。
+  # 更新只替换应用构建包；.env、独立数据目录与 /etc 下的 SSL 证书保持不变。
   if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
     echo -e "${YELLOW}检测到部署助手面板正在运行，正在重启服务...${NC}"
     if ! pm2 startOrReload ecosystem.config.cjs --update-env; then

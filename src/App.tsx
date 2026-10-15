@@ -1,289 +1,227 @@
-import React, { useState, useEffect } from 'react';
-import { ViewMode, PanelResult, NodeResult, ToastMessage, HistoryItem, PanelFlavor } from './types';
-import { copyToClipboard } from './utils/clipboard';
-import { Header } from './components/Header';
-import { HomeView } from './components/HomeView';
-import { PanelDeployView } from './components/PanelDeployView';
-import { NodeDeployView } from './components/NodeDeployView';
-import { ProtocolMatrixGuideModal } from './components/ProtocolMatrixGuideModal';
-import { SetupGuideModal } from './components/SetupGuideModal';
-import { HistoryDrawer } from './components/HistoryDrawer';
-import { Toast } from './components/Toast';
+import { useEffect, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
+import { adapterMetadataToCatalog, panels, tools } from './panelark/catalog';
+import { defaultPublicConfig, getPublicConfig, listPanelAdapters, listRecommendedResources, openRecommendedResource, type CdkGrant, type PublicConfig, type RecommendedResource } from './panelark/api';
+import type { ActiveServer, CatalogItem, ServerDraft, Theme, View } from './panelark/types';
+import {
+  AboutPage,
+  CatalogPage,
+  CdkGateModal,
+  DeployModal,
+  DocsPage,
+  Footer,
+  Header,
+  HomePage,
+  ServerConnectModal,
+} from './panelark/ui';
+
+function resolveInitialTheme(): Theme {
+  try {
+    const saved = localStorage.getItem('panelark-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    // Theme still works when local storage is unavailable.
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<ViewMode>('home');
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [guideOpen, setGuideOpen] = useState<boolean>(false);
-  const [setupGuideOpen, setSetupGuideOpen] = useState<boolean>(false);
-  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<Theme>(resolveInitialTheme);
+  const [view, setView] = useState<View>('home');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [deploymentUnlocked, setDeploymentUnlocked] = useState(false);
+  const [cdkGrant, setCdkGrant] = useState<CdkGrant | null>(null);
+  const [publicConfig, setPublicConfig] = useState<PublicConfig>(defaultPublicConfig);
+  const [cdkModalOpen, setCdkModalOpen] = useState(false);
+  const [serverModalOpen, setServerModalOpen] = useState(false);
+  const [activeServer, setActiveServer] = useState<ActiveServer | null>(null);
+  const [serverDraft, setServerDraft] = useState<ServerDraft>({ host: '', port: '22', username: 'root', authType: 'password', password: '', privateKey: '' });
+  const [deployTarget, setDeployTarget] = useState<CatalogItem | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [catalogPanels, setCatalogPanels] = useState<CatalogItem[]>(panels);
+  const [catalogTools, setCatalogTools] = useState<CatalogItem[]>(tools);
+  const [recommendedResources, setRecommendedResources] = useState<RecommendedResource[]>([]);
+  const serverConnected = Boolean(activeServer);
 
-  // Pre-filled panel login credentials for node deployment
-  const [prefilledPanel, setPrefilledPanel] = useState<{
-    host: string;
-    port: string;
-    path: string;
-    protocol?: 'http' | 'https';
-    username: string;
-    password?: string;
-    apiToken?: string;
-    panelFlavor?: PanelFlavor;
-    webCertFile?: string;
-    webKeyFile?: string;
-  } | null>(null);
-
-  const normalizeHistoryItem = (item: HistoryItem): HistoryItem => {
-    if (item.type === 'panel' && item.panelData) {
-      return item;
-    }
-    return {
-      id: item.id,
-      timestamp: item.timestamp,
-      type: 'node',
-      title: item.title,
-      summary: item.nodeData
-        ? `${item.nodeData.protocol} + ${item.nodeData.transport} · 入站 #${item.nodeData.inboundId}`
-        : item.summary.replace(/(?:vless|vmess|trojan|ss):\/\/\S+/gi, '[敏感链接已清理]')
-    };
-  };
-
-  // Load history from localStorage
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
     try {
-      const saved = localStorage.getItem('3xui_deploy_history');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const normalized = Array.isArray(parsed) ? parsed.map(normalizeHistoryItem) : [];
-        setHistoryItems(normalized);
-        localStorage.setItem('3xui_deploy_history', JSON.stringify(normalized));
-      }
+      localStorage.setItem('panelark-theme', theme);
     } catch {
-      // ignore
+      // Ignore persistence errors.
     }
+  }, [theme]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setMobileMenuOpen(false);
+  }, [view]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    getPublicConfig().then(setPublicConfig).catch(() => setToast('暂时无法读取站点配置，购买入口可能不可用'));
+    listPanelAdapters().then(response => {
+      const dynamicItems = adapterMetadataToCatalog(response.items);
+      if (dynamicItems.length) {
+        setCatalogPanels(dynamicItems.filter(item => item.kind === 'panel'));
+        setCatalogTools(dynamicItems.filter(item => item.kind === 'tool'));
+      }
+    }).catch(() => setToast('暂时无法读取动态适配器目录，已显示本地缓存目录'));
+    listRecommendedResources().then(response => setRecommendedResources(response.items)).catch(() => undefined);
   }, []);
 
-  const saveHistory = (newItem: HistoryItem) => {
-    setHistoryItems(prev => {
-      const updated = [newItem, ...prev].slice(0, 30);
-      try {
-        localStorage.setItem('3xui_deploy_history', JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
-      return updated;
-    });
-  };
-
-  const showToast = (
-    title: string,
-    message?: string,
-    type: 'success' | 'error' | 'info' | 'warning' = 'info'
-  ) => {
-    const id = `toast-${Date.now()}-${Math.random()}`;
-    setToasts(prev => [...prev, { id, title, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
-  };
-
-  const handleDismissToast = (id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-
-  const handleClearHistory = () => {
-    setHistoryItems([]);
+  const openResource = async (id: string) => {
     try {
-      localStorage.removeItem('3xui_deploy_history');
-    } catch {
-      // ignore
+      const { url } = await openRecommendedResource(id);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch { setToast('推荐资源暂时不可用'); }
+  };
+
+  const openPurchase = () => {
+    if (!publicConfig.purchaseEnabled) {
+      setToast('当前未开放在线购买，请联系客服');
+      return;
     }
-    showToast('清空历史记录', '已清除所有本地搭建记录', 'info');
+    if (!publicConfig.purchaseUrl) {
+      setToast('管理员尚未配置购买链接');
+      return;
+    }
+    window.open(publicConfig.purchaseUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const handlePanelCreated = (result: PanelResult) => {
-    const historyItem: HistoryItem = {
-      id: result.id,
-      timestamp: result.createdAt,
-      type: 'panel',
-      title: `xui面板 (${result.host}:${result.port})`,
-      summary: result.accessUrl,
-      panelData: { ...result }
-    };
-    saveHistory(historyItem);
+  const requestConnection = () => {
+    if (!deploymentUnlocked) {
+      setCdkModalOpen(true);
+      return;
+    }
+    setServerModalOpen(true);
   };
 
-  const handleNodeCreated = (result: NodeResult) => {
-    const historyItem: HistoryItem = {
-      id: result.id,
-      timestamp: result.createdAt,
-      type: 'node',
-      title: `${result.nodeName} (${result.protocol} + ${result.transport})`,
-      summary: `${result.protocol} + ${result.transport} · 入站 #${result.inboundId}`
-    };
-    saveHistory(historyItem);
+  const requestDeploy = (item?: CatalogItem) => {
+    if (!deploymentUnlocked) {
+      setCdkModalOpen(true);
+      return;
+    }
+    if (!serverConnected) {
+      setServerModalOpen(true);
+      return;
+    }
+    if (item) {
+      setDeployTarget(item);
+      return;
+    }
+    setView('deploy');
   };
 
-  const handleGoToNodeWithPanel = (result: PanelResult) => {
-    setPrefilledPanel({
-      host: result.host,
-      port: result.port,
-      path: result.path,
-      protocol: result.protocol,
-      username: result.username,
-      password: result.password || '',
-      apiToken: result.apiToken || '',
-      panelFlavor: result.panelFlavor || (
-        result.scriptType === 'recommended'
-          ? 'mogai'
-          : result.scriptType === 'official'
-            ? 'official'
-            : 'compatible'
-      ),
-      webCertFile: result.webCertFile,
-      webKeyFile: result.webKeyFile
-    });
-    setCurrentView('node');
-    showToast(
-      '已载入面板凭据',
-      result.apiToken
-        ? `账号、密码和 API Token 已自动填写，准备为 ${result.host}:${result.port} 搭建节点`
-        : `账号和密码已自动填写，准备为 ${result.host}:${result.port} 搭建节点`,
-      'success'
-    );
+  const handleCdkVerified = (grant: CdkGrant) => {
+    setCdkGrant(grant);
+    setActiveServer(null);
+    setDeploymentUnlocked(true);
+    setCdkModalOpen(false);
+    setToast('CDK 验证成功，请填写并检测目标服务器');
+    setServerModalOpen(true);
+  };
+
+  const handleServerConnected = (server: ActiveServer) => {
+    setActiveServer(server);
+    setServerModalOpen(false);
+    setView('deploy');
+    setToast('服务器检测完成，请选择需要安装的面板');
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] text-slate-200 flex flex-col font-sans selection:bg-indigo-500 selection:text-white antialiased">
-      {/* Background Glow Overlay */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[140px]" />
-        <div className="absolute bottom-0 right-1/4 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-[160px]" />
-      </div>
+    <div className="app-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+      <div className="grain" />
 
-      {/* Main Header Bar */}
       <Header
-        currentView={currentView}
-        onSelectView={setCurrentView}
-        onOpenGuide={() => setGuideOpen(true)}
-        onOpenSetupGuide={() => setSetupGuideOpen(true)}
-        onOpenHistory={() => setHistoryOpen(true)}
-        historyCount={historyItems.length}
+        theme={theme}
+        view={view}
+        mobileMenuOpen={mobileMenuOpen}
+        deploymentUnlocked={deploymentUnlocked}
+        serverConnected={serverConnected}
+        onToggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+        onToggleMenu={() => setMobileMenuOpen(open => !open)}
+        onViewChange={setView}
+        onConnect={requestConnection}
       />
 
-      {/* Main Body View Switching */}
-      <main className="flex-1 relative z-10">
-        {currentView === 'home' && (
-          <HomeView
-            onSelectView={setCurrentView}
-            onOpenGuide={() => setGuideOpen(true)}
-            onOpenSetupGuide={() => setSetupGuideOpen(true)}
+      <main className="main-content">
+        {view === 'home' && (
+          <HomePage
+            catalogItems={catalogPanels}
+            recommendedResources={recommendedResources}
+            onOpenResource={openResource}
+            deploymentUnlocked={deploymentUnlocked}
+            serverConnected={serverConnected}
+            serverEnvironment={activeServer?.environment}
+            onStart={() => requestDeploy()}
+            onPurchase={openPurchase}
+            purchaseButtonText={publicConfig.purchaseButtonText}
+            onOpenDocs={() => setView('docs')}
+            onViewPanels={() => setView('deploy')}
+            onConnect={requestConnection}
+            onToast={setToast}
           />
         )}
-
-        {currentView === 'panel' && (
-          <PanelDeployView
-            onPanelCreated={handlePanelCreated}
-            onGoToNodeWithPanel={handleGoToNodeWithPanel}
-            showToast={showToast}
+        {view === 'deploy' && (
+          <CatalogPage
+            items={catalogPanels}
+            title="面板部署中心"
+            eyebrow="Panel catalog"
+            description="可先浏览面板目录；正式部署必须依次完成 CDK 验证和服务器检测，之后再选择面板。"
+            deploymentUnlocked={deploymentUnlocked}
+            serverConnected={serverConnected}
+            serverEnvironment={activeServer?.environment}
+            onDeploy={requestDeploy}
+            onConnect={requestConnection}
           />
         )}
-
-        {currentView === 'node' && (
-          <NodeDeployView
-            initialPanelData={prefilledPanel}
-            onNodeCreated={handleNodeCreated}
-            showToast={showToast}
+        {view === 'tools' && (
+          <CatalogPage
+            items={catalogTools}
+            title="系统工具箱"
+            eyebrow="System toolkit"
+            description="安全地安装常用组件与优化项，不接管你的日常服务器运维。"
+            deploymentUnlocked={deploymentUnlocked}
+            serverConnected={serverConnected}
+            serverEnvironment={activeServer?.environment}
+            onDeploy={requestDeploy}
+            onConnect={requestConnection}
           />
         )}
+        {view === 'docs' && <DocsPage onStart={() => requestDeploy()} />}
+        {view === 'about' && <AboutPage onViewPanels={() => setView('deploy')} />}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950/80 py-6 text-center text-xs text-slate-500 relative z-10">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-400">xui面板一键搭建助手</span>
-            <span>&bull;</span>
-            <span>专注面板极速部署与 SOCKS 链式节点构建</span>
-          </div>
-          <div className="flex items-center gap-4 text-[11px]">
-            <button
-              onClick={() => setSetupGuideOpen(true)}
-              className="hover:text-indigo-400 transition-colors font-medium text-indigo-300"
-            >
-              搭建使用指南
-            </button>
-            <button
-              onClick={() => setGuideOpen(true)}
-              className="hover:text-cyan-400 transition-colors"
-            >
-              协议矩阵速查
-            </button>
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className="hover:text-indigo-400 transition-colors"
-            >
-              历史配置 ({historyItems.length})
-            </button>
-          </div>
-        </div>
-      </footer>
+      <Footer onNavigate={setView} />
 
-      {/* Modals & Overlays */}
-      <SetupGuideModal
-        isOpen={setupGuideOpen}
-        onClose={() => setSetupGuideOpen(false)}
-        onSelectView={view => setCurrentView(view)}
-      />
+      {cdkModalOpen && (
+        <CdkGateModal
+          onClose={() => setCdkModalOpen(false)}
+          onVerified={handleCdkVerified}
+          onPurchase={openPurchase}
+          purchaseButtonText={publicConfig.purchaseButtonText}
+        />
+      )}
+      {serverModalOpen && (
+        <ServerConnectModal
+          onClose={() => setServerModalOpen(false)}
+          onConnected={handleServerConnected}
+          draft={serverDraft}
+          onDraftChange={setServerDraft}
+          grantToken={cdkGrant?.grantToken || ''}
+        />
+      )}
+      {deployTarget && cdkGrant && activeServer && <DeployModal item={deployTarget} grantToken={cdkGrant.grantToken} server={activeServer} onConsumed={() => setDeploymentUnlocked(false)} onClose={() => { setDeployTarget(null); if (!deploymentUnlocked) { setCdkGrant(null); setActiveServer(null); } }} onToast={setToast} />}
 
-      <ProtocolMatrixGuideModal
-        isOpen={guideOpen}
-        onClose={() => setGuideOpen(false)}
-      />
-
-      <HistoryDrawer
-        isOpen={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        items={historyItems}
-        onClearHistory={handleClearHistory}
-        onCopyText={async (text, title) => {
-          const success = await copyToClipboard(text);
-          if (success) {
-            showToast('已复制到剪贴板', title, 'success');
-          } else {
-            showToast('复制失败', '请手动选中文本进行复制', 'error');
-          }
-        }}
-        onSelectPanelToNode={data => {
-          setPrefilledPanel({
-            host: data.host,
-            port: data.port,
-            path: data.path,
-            protocol: data.protocol,
-            username: data.username,
-            password: data.password || '',
-            apiToken: data.apiToken || '',
-            panelFlavor: data.panelFlavor || (
-              data.scriptType === 'recommended'
-                ? 'mogai'
-                : data.scriptType === 'official'
-                  ? 'official'
-                  : 'compatible'
-            ),
-            webCertFile: data.webCertFile,
-            webKeyFile: data.webKeyFile
-          });
-          setCurrentView('node');
-          showToast(
-            '已载入面板凭证',
-            data.apiToken
-              ? '面板地址、账号、密码、Token 和证书路径已自动回填'
-              : '面板地址、账号和密码已自动回填',
-            'success'
-          );
-        }}
-      />
-
-      <Toast toasts={toasts} onDismiss={handleDismissToast} />
+      {toast && <div className="toast" role="status"><CheckCircle2 size={18} /><span>{toast}</span></div>}
     </div>
   );
 }

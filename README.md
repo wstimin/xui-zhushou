@@ -1,8 +1,18 @@
-# xui-zhushou
+# PanelArk
 
-`xui-zhushou` 是一个通过 SSH 和 3x-ui API 工作的 Web 部署助手。它可以连接 Linux VPS 安装 3x-ui、登录已有面板创建节点，并按需向面板的全局 Xray 模板写入 SOCKS5 出站和路由。
+PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平台，已完成真实 CDK 商业授权、安全 SSH 预检、持久化任务引擎、多面板适配器、运营后台、加密迁移和签名在线更新闭环。
 
-正式仓库：<https://github.com/wstimin/xui-zhushou>
+## PanelArk 管理后台与 CDK
+
+- 用户端地址：`http://服务器IP:1888/`
+- 管理后台：`http://服务器IP:1888/admin`
+- 首次启动且未设置 `PANELARK_SETUP_TOKEN` 时，初始化令牌写入 `data/admin-setup-token.txt`；完成超级管理员初始化后该文件自动删除。
+- 系统不会自动创建任何 CDK。首次管理员初始化后，请从后台创建正式套餐和批次并安全保存一次性显示的授权码。
+- CDK 明文只在后台批次生成成功时显示一次，数据库仅保存不可逆哈希和末四位提示。
+- 购买按钮、购买链接、客服链接和站点公告均可从后台配置，外部链接必须使用 HTTPS。
+- 本地开发的数据库、密钥和初始化令牌默认位于 `data/`；一键安装脚本会把生产数据放在更新不会覆盖的 `/var/lib/panelark`。迁移服务器前必须备份该目录。
+
+目录中的适配器均执行真实 SSH 安装命令和安装后验证；标记为“待实机验收”的项目应在目标发行版上完成验收后再对外开放。
 
 ## 主要能力
 
@@ -67,7 +77,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.0.0`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.0`。
 
 ## 远端构建与发布
 
@@ -77,9 +87,11 @@ curl -s http://127.0.0.1:1888/api/health
 xui-zhushou-linux-v2.0.0.tar.gz
 xui-zhushou-linux.tar.gz
 SHA256SUMS
+release-manifest.json
+adapter-catalog.json
 ```
 
-一键安装脚本固定下载 `releases/latest/download/xui-zhushou-linux.tar.gz`，因此新标签发布完成后，所有服务器通过菜单 `[1]` 更新时都会拉取同一份已经验证的生产构建包。
+一键安装脚本固定下载 `releases/latest/download/xui-zhushou-linux.tar.gz`，后台在线更新还会验证 `release-manifest.json` 的 Ed25519 签名以及更新包 SHA-256。新标签发布完成后，服务器可在管理后台查看真实下载、切换、重启、健康检查或自动回滚状态。
 
 ## 3x-ui 安装脚本
 
@@ -100,7 +112,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/wstimin/mogai-3xui/main/instal
 https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh
 ```
 
-两套脚本使用独立的安装逻辑。官方脚本使用其无人值守环境变量；推荐脚本按实际交互顺序自动回答端口和 TLS 选项。安装完成后，两种脚本都会通过官方 `x-ui setting` 命令写入用户填写或助手生成的用户名、密码、端口和 Web 路径，并在确认命令返回成功后重启服务。推荐脚本优先适配更多客户端。该脚本安装时要求配置 TLS：有域名使用域名证书，无域名使用 IP 证书。后端读取面板的实际证书状态、证书路径和 API Token；没有现成 Token 时会在安装完成后读取一次。安装成功弹窗会显示实际生效的账号密码与 Token，并在跳转“搭建节点”时自动填写 Token 和 TLS 证书路径。
+两套脚本使用独立的安装逻辑。官方脚本使用其无人值守环境变量；推荐脚本按实际交互顺序自动回答端口和 TLS 选项。安装完成后，两种脚本都会通过官方 `x-ui setting` 命令写入用户填写的用户名、密码、端口和 Web 路径，并在确认命令返回成功后重启服务。推荐脚本优先适配更多客户端。该脚本安装时要求配置 TLS：有域名使用域名证书，无域名使用 IP 证书。后端读取面板的实际证书状态、证书路径和 API Token；没有现成 Token 时会在安装完成后读取一次。安装成功弹窗显示本次任务实际返回的访问地址、账号密码与 Token；敏感交付结果只保存在当前服务进程内，并在 CDK 核销后清除，数据库任务记录只保存脱敏结果。
 
 自定义 3x-ui 安装脚本只接受 HTTPS URL。非 root SSH 用户必须具备 `sudo -n` 免密 sudo 权限。
 
@@ -150,14 +162,28 @@ npm start
 
 ```env
 PORT=1888
+PANELARK_DATA_DIR=
+PANELARK_SETUP_TOKEN=
 APP_AUTH_TOKEN=
 SSL_CERT=
 SSL_KEY=
+PANELARK_REQUIRE_HTTPS=false
+PANELARK_TRUST_PROXY=false
+PANELARK_BACKUP_PASSPHRASE=
+PANELARK_UPDATE_PUBLIC_KEY=
+PANELARK_UPDATE_MANIFEST_URL=
+PANELARK_BETA_MANIFEST_URL=
 ```
 
 - `PORT`：助手监听端口，安装脚本会同步用于防火墙和访问提示。
+- `PANELARK_DATA_DIR`：可选的运行数据目录，默认是项目目录下的 `data/`。
+- `PANELARK_SETUP_TOKEN`：可选的首次管理员初始化令牌；未设置时自动生成到数据目录。
 - `APP_AUTH_TOKEN`：可选的助手 API 保护。设置后，请由受信任的反向代理添加 `Authorization: Bearer <token>` 或 `X-App-Token` 请求头。
 - `SSL_CERT` / `SSL_KEY`：助手自身 HTTPS 证书路径。两者留空时，服务端也会自动检查 `/etc/3xui-assistant/ssl/cert.pem` 和 `/etc/3xui-assistant/ssl/key.pem`。
+- `PANELARK_REQUIRE_HTTPS`：生产环境设为 `true` 后拒绝明文 HTTP 请求。
+- `PANELARK_TRUST_PROXY`：仅在可信反向代理正确设置转发协议头时启用。
+- `PANELARK_BACKUP_PASSPHRASE`：定时加密备份使用的密码，不会写入数据库。
+- 更新公钥默认来自正式发布包内的 `release-public-key.pem`；更新地址可通过环境变量切换到受控镜像。
 
 ## SOCKS 路由
 
@@ -181,4 +207,4 @@ SSH 密码、私钥、面板密码和 API Token 都会经过助手后端。不�
 
 仓库包含后端单元测试，覆盖 URL 与端口验证、Shell 转义、推荐与官方安装命令、Reality/TLS 入站、订阅 URL 和 SOCKS 模板注入。发布检查还包括 TypeScript 类型检查、Vite/服务端生产构建和 `install.sh` Bash 语法检查。
 
-自动验证不会连接真实 VPS，也不会向真实 3x-ui 面板写入配置。
+自动化测试使用受控 SSH 与 HTTP 测试服务，不会连接外部 VPS，也不会向外部 3x-ui 面板写入配置。正式开放某个适配器前仍需完成对应系统版本的实机验收。

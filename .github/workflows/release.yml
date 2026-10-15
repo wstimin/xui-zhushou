@@ -42,6 +42,11 @@ jobs:
       - name: Prepare release package
         run: npm run package:release
 
+      - name: Embed trusted release public key
+        env:
+          PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
+        run: node scripts/sign-release.mjs --public-only
+
       - name: Read release version
         id: release
         shell: bash
@@ -58,6 +63,9 @@ jobs:
           test -s release/package/dist/index.html
           test -s release/package/install.sh
           test -s release/package/package-lock.json
+          test -s release/package/release-public-key.pem
+          test -s release/package/scripts/apply-update.mjs
+          test ! -e release/package/dist/server.cjs.map
           test ! -e release/package/server.ts
           test ! -e release/package/src
 
@@ -78,8 +86,19 @@ jobs:
           version="${{ steps.release.outputs.version }}"
           tar -C release/package -czf "release/xui-zhushou-linux-v${version}.tar.gz" .
           cp "release/xui-zhushou-linux-v${version}.tar.gz" release/xui-zhushou-linux.tar.gz
+
+      - name: Sign release and adapter manifests
+        env:
+          PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
+          PANELARK_RELEASE_CHANNEL: stable
+          PANELARK_RELEASE_NOTES: "Signed online update|Pre-update encrypted backup|Automatic health-check rollback"
+        run: node scripts/sign-release.mjs
+
+      - name: Create checksums
+        shell: bash
+        run: |
           cd release
-          sha256sum xui-zhushou-linux*.tar.gz > SHA256SUMS
+          sha256sum xui-zhushou-linux*.tar.gz adapter-catalog.json release-manifest.json > SHA256SUMS
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -88,6 +107,8 @@ jobs:
           path: |
             release/xui-zhushou-linux*.tar.gz
             release/SHA256SUMS
+            release/release-manifest.json
+            release/adapter-catalog.json
           retention-days: 30
 
       - name: Publish GitHub release
@@ -99,3 +120,5 @@ jobs:
           files: |
             release/xui-zhushou-linux*.tar.gz
             release/SHA256SUMS
+            release/release-manifest.json
+            release/adapter-catalog.json

@@ -12,6 +12,7 @@ import { buildInstallCommand, connectSsh, execSsh, formatServerInspectionError, 
 import { assertHttpsUrl, cleanHostInput, normalizeWebPath, optionalString, panelPassword, panelUsername, randomToken, validPort } from "./server/validation.js";
 import { findInboundRecord, isRetryablePanelConnectionError, parseApiTokenFromOutput, XuiClient, XuiClientOptions } from "./server/xui-client.js";
 import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
+import { mountPanelArkApi } from "./server/panelark-api.js";
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -80,6 +81,17 @@ function noStore(_req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+function runtimeVersion() {
+  const configured = optionalString(process.env.APP_VERSION);
+  if (configured) return configured;
+  const versionFile = path.join(process.cwd(), "VERSION");
+  if (fs.existsSync(versionFile)) return fs.readFileSync(versionFile, "utf8").trim();
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { version?: string };
+    return optionalString(manifest.version) || "development";
+  } catch { return "development"; }
+}
+
 function requireAppAuth(req: Request, res: Response, next: NextFunction) {
   const expected = process.env.APP_AUTH_TOKEN;
   if (!expected) return next();
@@ -132,9 +144,40 @@ function parseInstallerResult(output: string): Record<string, string> {
 async function startServer() {
   const app = express();
   const port = validPort(process.env.PORT, 1888);
+  const production = process.env.NODE_ENV === "production";
+  const httpsConfigured = Boolean(optionalString(process.env.SSL_CERT) && optionalString(process.env.SSL_KEY));
 
   app.disable("x-powered-by");
-  app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  app.set("trust proxy", process.env.PANELARK_TRUST_PROXY === "true" ? 1 : "loopback");
+  app.use(helmet({
+    contentSecurityPolicy: production ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", "data:"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        upgradeInsecureRequests: httpsConfigured ? [] : null,
+      },
+    } : false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    referrerPolicy: { policy: "no-referrer" },
+    strictTransportSecurity: production && httpsConfigured ? { maxAge: 31_536_000, includeSubDomains: true, preload: false } : false,
+  }));
+  app.use((req, res, next) => {
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    res.setHeader("X-Request-Id", req.header("x-request-id")?.slice(0, 80) || randomUUID());
+    if (production && process.env.PANELARK_REQUIRE_HTTPS === "true" && !(req.secure || req.header("x-forwarded-proto") === "https")) {
+      return res.status(426).json({ success: false, error: "生产环境要求通过 HTTPS 访问" });
+    }
+    next();
+  });
   app.use(express.json({ limit: "256kb" }));
   app.use("/api", rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
   app.use("/api", noStore);
@@ -142,10 +185,12 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      version: optionalString(process.env.APP_VERSION) || "development",
+      version: runtimeVersion(),
       timestamp: new Date().toISOString(),
     });
   });
+
+  await mountPanelArkApi(app);
 
   app.use("/api", requireAppAuth);
 
@@ -655,9 +700,9 @@ async function startServer() {
     const server = https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }, app);
     server.keepAliveTimeout = 120_000;
     server.headersTimeout = 125_000;
-    server.listen(port, "0.0.0.0", () => console.log(`[HTTPS] 3x-ui 部署助手: https://0.0.0.0:${port}`));
+    server.listen(port, "0.0.0.0", () => console.log(`[HTTPS] PanelArk: https://0.0.0.0:${port}`));
   } else {
-    const server = app.listen(port, "0.0.0.0", () => console.log(`[HTTP] 3x-ui 部署助手: http://0.0.0.0:${port}`));
+    const server = app.listen(port, "0.0.0.0", () => console.log(`[HTTP] PanelArk: http://0.0.0.0:${port}`));
     server.keepAliveTimeout = 120_000;
     server.headersTimeout = 125_000;
   }

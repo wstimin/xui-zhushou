@@ -7,5 +7,6 @@ coverage/
 *.log
 *.zip
 .npm-cache/
+data/
 .env*
 !.env.example

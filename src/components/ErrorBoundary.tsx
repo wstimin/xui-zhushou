@@ -32,30 +32,30 @@ export class ErrorBoundary extends React.Component<Props, State> {
   override render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#0a0a0c] text-white flex items-center justify-center p-4">
-          <div className="max-w-md w-full p-6 sm:p-8 rounded-3xl bg-[#12121a] border border-rose-500/30 shadow-2xl space-y-6 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
-              <AlertTriangle className="w-8 h-8" />
+        <div className="error-page">
+          <div className="error-card">
+            <div className="error-icon">
+              <AlertTriangle size={30} />
             </div>
 
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white">页面运行时捕获到异常</h2>
-              <p className="text-xs text-zinc-400 leading-relaxed">
+            <div>
+              <h2>页面运行时捕获到异常</h2>
+              <p>
                 应用遇到了意外的渲染错误。页面已自动受保护，未直接崩溃为白屏。
               </p>
             </div>
 
             {this.state.error && (
-              <div className="p-3 rounded-xl bg-black/50 border border-white/10 text-left font-mono text-xs text-rose-300 break-all max-h-32 overflow-y-auto">
+              <div className="error-detail">
                 {this.state.error.message || String(this.state.error)}
               </div>
             )}
 
             <button
               onClick={this.handleReset}
-              className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
+              className="button button-primary button-block"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw size={16} />
               <span>刷新页面恢复</span>
             </button>
           </div>

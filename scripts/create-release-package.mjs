@@ -11,6 +11,7 @@ const requiredFiles = [
   "install.sh",
   "package.json",
   "package-lock.json",
+  "README.md",
 ];
 
 if (!fs.existsSync(path.join(root, "dist", "server.cjs"))) {
@@ -23,6 +24,14 @@ fs.cpSync(path.join(root, "dist"), path.join(outputDir, "dist"), { recursive: tr
 
 for (const file of requiredFiles) {
   fs.copyFileSync(path.join(root, file), path.join(outputDir, file));
+}
+
+fs.mkdirSync(path.join(outputDir, "scripts"), { recursive: true });
+fs.copyFileSync(path.join(root, "scripts", "apply-update.mjs"), path.join(outputDir, "scripts", "apply-update.mjs"));
+fs.mkdirSync(path.join(outputDir, "docs", "panelark"), { recursive: true });
+for (const file of ["STAGE7_OPERATIONS.md", "STAGE8_RELEASE.md"]) {
+  const source = path.join(root, "docs", "panelark", file);
+  if (fs.existsSync(source)) fs.copyFileSync(source, path.join(outputDir, "docs", "panelark", file));
 }
 
 fs.writeFileSync(path.join(outputDir, "VERSION"), `${packageJson.version}\n`, "utf8");
