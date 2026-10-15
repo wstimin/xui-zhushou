@@ -15,7 +15,7 @@ import {
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 
-const emptySettings: AdminSettings = { purchaseEnabled: true, purchaseButtonText: '购买 CDK', purchaseUrl: '', supportUrl: '', siteNotice: '' };
+const emptySettings: AdminSettings = { purchaseEnabled: true, purchaseButtonText: '购买 CDK', purchaseUrl: '', supportUrl: '', siteNotice: '', adminPath: '/admin' };
 const roleNames: Record<AdminRole, string> = { super_admin: '超级管理员', operator: '运营管理员', support: '售后人员' };
 
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
@@ -214,12 +214,21 @@ function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice
   useEffect(() => { adminApi.settings().then(({ success: _success, ...settings }) => setForm(settings)).catch(error => notify({ kind: 'error', text: message(error) })); }, [notify]);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true);
-    try { const { success: _success, ...settings } = await adminApi.updateSettings(form); setForm(settings); notify({ kind: 'success', text: '站点配置已保存，用户端刷新后生效' }); }
+    try {
+      const { success: _success, ...settings } = await adminApi.updateSettings(form);
+      setForm(settings);
+      const currentPath = window.location.pathname.replace(/\/+$/g, '') || '/';
+      if (currentPath !== settings.adminPath && !currentPath.startsWith(`${settings.adminPath}/`)) {
+        window.location.assign(settings.adminPath);
+        return;
+      }
+      notify({ kind: 'success', text: '站点配置已保存，用户端刷新后生效' });
+    }
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
-  return <><PageHeading kicker="Site configuration" title="站点配置" description="配置用户端购买按钮、跳转链接、客服入口与公告。外链必须使用 HTTPS。" /><form className="admin-panel admin-settings-form" onSubmit={submit}>
+  return <><PageHeading kicker="Site configuration" title="站点配置" description="配置管理后台路径、用户端购买按钮、跳转链接、客服入口与公告。外链必须使用 HTTPS。" /><form className="admin-panel admin-settings-form" onSubmit={submit}>
     <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>关闭后用户端隐藏购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
-    <div className="admin-form-grid"><AdminInput label="按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} /><AdminInput label="购买链接" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} /><AdminInput label="客服链接" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /><AdminInput label="全站公告" value={form.siteNotice} setValue={siteNotice => setForm({ ...form, siteNotice })} disabled={!editable} /></div>
+    <div className="admin-form-grid"><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><AdminInput label="按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} /><AdminInput label="购买链接" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} /><AdminInput label="客服链接" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /><AdminInput label="全站公告" value={form.siteNotice} setValue={siteNotice => setForm({ ...form, siteNotice })} disabled={!editable} /></div>
     {editable ? <button className="admin-primary" disabled={busy}>{busy ? '正在保存…' : '保存配置'}</button> : <p className="admin-readonly">当前角色只有查看权限。</p>}
   </form></>;
 }

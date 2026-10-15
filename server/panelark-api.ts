@@ -11,6 +11,7 @@ import { registerCatalogAdapters } from "./catalog-adapters.js";
 import { backupFilePath, backupLimits, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup } from "./panelark-backup.js";
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
+import { normalizeAdminPath, readAdminPath } from "./admin-path.js";
 import {
   generateCdkCode,
   generateTotpSecret,
@@ -175,6 +176,10 @@ function getPublicSettings(db: PanelArkDatabase) {
     supportUrl: values.support_url || "",
     siteNotice: values.site_notice || "",
   };
+}
+
+function getAdminSettings(db: PanelArkDatabase) {
+  return { ...getPublicSettings(db), adminPath: readAdminPath(db) };
 }
 
 function catalogItems(db: PanelArkDatabase) {
@@ -613,12 +618,17 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/settings", requirePermission("settings:read"), (_req, res) => res.json({ success: true, ...getPublicSettings(db) }));
+  router.get("/admin/settings", requirePermission("settings:read"), (_req, res) => res.json({ success: true, ...getAdminSettings(db) }));
 
   router.put("/admin/settings", requirePermission("settings:write"), (req: AuthenticatedRequest, res) => {
     try {
       const purchaseUrl = text(req.body?.purchaseUrl, 500);
       const supportUrl = text(req.body?.supportUrl, 500);
+      const previousAdminPath = readAdminPath(db);
+      const adminPath = req.body?.adminPath === undefined ? previousAdminPath : normalizeAdminPath(req.body.adminPath);
+      if (adminPath !== previousAdminPath && req.panelarkAdmin!.role !== "super_admin") {
+        throw new Error("只有超级管理员可以修改后台路径");
+      }
       for (const url of [purchaseUrl, supportUrl].filter(Boolean)) {
         const parsed = new URL(url);
         if (parsed.protocol !== "https:") throw new Error("购买和客服链接必须使用 HTTPS");
@@ -629,12 +639,13 @@ export async function mountPanelArkApi(app: Express) {
         purchase_url: purchaseUrl,
         support_url: supportUrl,
         site_notice: text(req.body?.siteNotice, 500),
+        admin_path: adminPath,
       };
       db.transaction(() => {
         for (const [key, value] of Object.entries(updates)) db.run("INSERT OR REPLACE INTO site_settings(key, value, updated_at) VALUES (?, ?, ?)", [key, value, now()]);
       });
-      audit(db, req, "settings.update", "site_settings", undefined, { purchaseEnabled: bool(req.body?.purchaseEnabled) }, req.panelarkAdmin!.id);
-      res.json({ success: true, ...getPublicSettings(db) });
+      audit(db, req, "settings.update", "site_settings", undefined, { purchaseEnabled: bool(req.body?.purchaseEnabled), adminPathChanged: adminPath !== previousAdminPath }, req.panelarkAdmin!.id);
+      res.json({ success: true, ...getAdminSettings(db) });
     } catch (error) { sendError(res, error); }
   });
 

@@ -5,7 +5,7 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 ## PanelArk 管理后台与 CDK
 
 - 用户端地址：`http://服务器IP:1888/`
-- 管理后台：`http://服务器IP:1888/admin`
+- 管理后台默认地址：`http://服务器IP:1888/admin`；超级管理员可在“站点配置”修改路径，保存后旧路径立即失效并自动跳转到新地址。
 - 首次启动且未设置 `PANELARK_SETUP_TOKEN` 时，初始化令牌写入 `data/admin-setup-token.txt`；完成超级管理员初始化后该文件自动删除。
 - 系统不会自动创建任何 CDK。首次管理员初始化后，请从后台创建正式套餐和批次并安全保存一次性显示的授权码。
 - CDK 明文只在后台批次生成成功时显示一次，数据库仅保存不可逆哈希和末四位提示。
@@ -77,7 +77,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.1`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.2`。
 
 ## 远端构建与发布
 

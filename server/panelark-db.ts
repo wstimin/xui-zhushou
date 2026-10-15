@@ -338,6 +338,7 @@ export class PanelArkDatabase {
       purchase_url: "",
       support_url: "",
       site_notice: "",
+      admin_path: "/admin",
       backup_schedule_enabled: "false",
       backup_last_scheduled_at: "",
     };

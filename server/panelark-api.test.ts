@@ -101,9 +101,10 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     });
     assert.equal(unsafeSettings.status, 400);
     const safeSettings = await json(await fetch(`${base}/admin/settings`, {
-      method: "PUT", headers: adminHeaders, body: JSON.stringify({ purchaseEnabled: true, purchaseButtonText: "立即购买", purchaseUrl: "https://shop.example/cdk" }),
+      method: "PUT", headers: adminHeaders, body: JSON.stringify({ purchaseEnabled: true, purchaseButtonText: "立即购买", purchaseUrl: "https://shop.example/cdk", adminPath: "/private-console" }),
     }));
     assert.equal(safeSettings.purchaseUrl, "https://shop.example/cdk");
+    assert.equal(safeSettings.adminPath, "/private-console");
 
     const resource = await json(await fetch(`${base}/admin/resources`, {
       method: "POST", headers: adminHeaders,

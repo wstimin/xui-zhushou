@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "product": "PanelArk-Adapters",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "entries": [
     { "id": "3x-ui", "enabled": true, "sortOrder": 0 },
     { "id": "s-ui", "enabled": true, "sortOrder": 10 },

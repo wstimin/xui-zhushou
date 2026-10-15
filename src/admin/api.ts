@@ -16,7 +16,7 @@ export interface AuditRecord {
   ip?: string; details?: string; created_at: string;
 }
 export interface AdminSettings {
-  purchaseEnabled: boolean; purchaseButtonText: string; purchaseUrl: string; supportUrl: string; siteNotice: string;
+  purchaseEnabled: boolean; purchaseButtonText: string; purchaseUrl: string; supportUrl: string; siteNotice: string; adminPath: string;
 }
 export interface CatalogAdminRecord { id: string; name: string; kind: 'panel' | 'tool'; category: string; description: string; enabled: boolean; sortOrder: number }
 export interface ResourceRecord { id: string; type: 'vps' | 'domain' | 'cdn' | 'other'; title: string; description: string; badge: string; url: string; enabled: number; sort_order: number; click_count: number }

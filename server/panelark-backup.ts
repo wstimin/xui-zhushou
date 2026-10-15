@@ -79,7 +79,7 @@ export function createBackupArchive(db: PanelArkDatabase, dataDirectory: string,
     format: 1,
     product: "PanelArk",
     createdAt: new Date().toISOString(),
-    appVersion: process.env.npm_package_version || "2.1.1",
+    appVersion: process.env.npm_package_version || "2.1.2",
     database: db.exportBytes().toString("base64"),
     cdkPepper: fs.readFileSync(secretPath).toString("base64"),
   }, passphrase);

@@ -13,6 +13,7 @@ import { assertHttpsUrl, cleanHostInput, normalizeWebPath, optionalString, panel
 import { findInboundRecord, isRetryablePanelConnectionError, parseApiTokenFromOutput, XuiClient, XuiClientOptions } from "./server/xui-client.js";
 import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
 import { mountPanelArkApi } from "./server/panelark-api.js";
+import { isAdminPagePath, markAdminHtml, readAdminPath } from "./server/admin-path.js";
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -190,7 +191,7 @@ async function startServer() {
     });
   });
 
-  await mountPanelArkApi(app);
+  const panelArk = await mountPanelArkApi(app);
 
   app.use("/api", requireAppAuth);
 
@@ -687,11 +688,26 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true, allowedHosts: true }, appType: "spa" });
+    const sourceHtml = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
+    app.use(async (req, res, next) => {
+      if (req.method !== "GET" || !isAdminPagePath(req.path, readAdminPath(panelArk.db))) return next();
+      try {
+        const html = await vite.transformIndexHtml(req.originalUrl, markAdminHtml(sourceHtml, true));
+        res.status(200).type("html").send(html);
+      } catch (error) {
+        vite.ssrFixStacktrace(error as Error);
+        next(error);
+      }
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
+    const indexHtml = fs.readFileSync(path.join(distPath, "index.html"), "utf8");
+    app.use(express.static(distPath, { index: false }));
+    app.get("*", (req, res) => {
+      const admin = isAdminPagePath(req.path, readAdminPath(panelArk.db));
+      res.status(200).type("html").send(markAdminHtml(indexHtml, admin));
+    });
   }
 
   const certPath = process.env.SSL_CERT || "/etc/3xui-assistant/ssl/cert.pem";

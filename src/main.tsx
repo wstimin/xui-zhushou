@@ -5,10 +5,13 @@ import AdminApp from './admin/AdminApp.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root')!;
+const adminView = rootElement.dataset.panelarkView === 'admin';
+
+createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary>
-      {window.location.pathname.startsWith('/admin') ? <AdminApp /> : <App />}
+      {adminView ? <AdminApp /> : <App />}
     </ErrorBoundary>
   </StrictMode>,
 );
