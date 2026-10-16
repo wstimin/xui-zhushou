@@ -137,7 +137,7 @@ export function buildFirewallVerifyCommand(kind: FirewallKind, ports: number[], 
 
 export function buildDockerInstallCommand(packageManager: string, useSudo: boolean) {
   const prefix = useSudo ? "sudo -n " : "";
-  const verify = "command -v docker >/dev/null && (docker compose version >/dev/null 2>&1 || docker-compose version >/dev/null 2>&1)";
+  const verify = `command -v docker >/dev/null && (${prefix}docker compose version >/dev/null 2>&1 || ${prefix}docker-compose version >/dev/null 2>&1) && ${prefix}docker info >/dev/null`;
   if (packageManager === "apt") {
     return `${prefix}env DEBIAN_FRONTEND=noninteractive apt-get update -y && ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io && (${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2 || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose) && ${prefix}systemctl enable --now docker && ${verify}`;
   }

@@ -31,6 +31,12 @@ test("catalog adapters publish a complete support matrix for panels and tools", 
   }
   assert.ok(definitions.some(item => item.id === "marzban" && item.requirements.systemd === false));
   assert.ok(definitions.some(item => item.id === "docker" && item.kind === "tool"));
+  for (const id of ["portainer", "npm", "nezha", "uptime-kuma"]) {
+    const item = definitions.find(definition => definition.id === id)!;
+    assert.deepEqual(item.requirements.architectures, ["amd64", "arm64"]);
+    assert.deepEqual(item.requirements.autoInstallDependencies, ["Docker Engine", "Docker Compose"]);
+    assert.equal(item.requirements.systemd, true);
+  }
 });
 
 test("fallback catalog exposes only registered install adapters", () => {
@@ -160,18 +166,45 @@ test("every published catalog adapter passes its controlled install and verify p
   }
 });
 
-test("catalog adapters stop before installation when a required command is missing", async () => {
+test("Docker catalog adapters automatically install and verify Docker when it is missing", async () => {
   const commands: string[] = [];
+  let dependencyChecks = 0;
+  const taskContext = context({ ipOrDomain: "198.51.100.53" });
   const adapters = registerCatalogAdapters({
     connect: async () => ({ client: { end() {} } as any, host: "198.51.100.53", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
     inspect: async () => ({ osId: "ubuntu", osVersion: "22.04", packageManager: "apt", totalRamMb: 4096, systemdAvailable: true, isRoot: true, status: "compatible", osName: "Ubuntu", arch: "x86_64" }) as any,
     exec: async (_client, command) => {
       commands.push(command);
-      return command.includes("command -v") ? { code: 127, stdout: "docker\n", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+      if (command.startsWith("for command_name")) {
+        dependencyChecks += 1;
+        return dependencyChecks === 1 ? { code: 127, stdout: "docker\n", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+      }
+      if (command.includes("grep -E '^portainer$'")) return { code: 0, stdout: "portainer\n", stderr: "" };
+      return { code: 0, stdout: "ok\n", stderr: "" };
     },
   });
   const adapter = adapters.find(item => item.metadata.id === "portainer")!;
-  await assert.rejects(adapter.execute("install", context({ ipOrDomain: "198.51.100.53" }) as any), /缺少前置命令：docker/);
+  const result = await adapter.execute("install", taskContext as any) as any;
+  assert.equal(result.adapterId, "portainer");
+  assert.ok(commands.some(command => command.includes("apt-get install -y docker.io")));
+  assert.ok(commands.some(command => command.includes("docker info")));
+  assert.ok(commands.findIndex(command => command.includes("apt-get install -y docker.io")) < commands.findIndex(command => command.includes("portainer-ce:lts")));
+  assert.ok(taskContext.events.some((message: string) => message.includes("正在自动安装 Docker Engine 与 Compose")));
+  assert.ok(taskContext.events.some((message: string) => message.includes("已自动安装并验证通过")));
+});
+
+test("catalog adapters stop before installation when a non-automatic command is missing", async () => {
+  const commands: string[] = [];
+  const adapters = registerCatalogAdapters({
+    connect: async () => ({ client: { end() {} } as any, host: "198.51.100.58", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
+    inspect: async () => ({ osId: "ubuntu", osVersion: "22.04", packageManager: "apt", totalRamMb: 4096, systemdAvailable: true, isRoot: true, status: "compatible", osName: "Ubuntu", arch: "x86_64" }) as any,
+    exec: async (_client, command) => {
+      commands.push(command);
+      return command.includes("command -v") ? { code: 127, stdout: "curl\n", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  const adapter = adapters.find(item => item.metadata.id === "s-ui")!;
+  await assert.rejects(adapter.execute("install", context({ ipOrDomain: "198.51.100.58" }) as any), /缺少前置命令：curl/);
   assert.equal(commands.length, 1);
 });
 

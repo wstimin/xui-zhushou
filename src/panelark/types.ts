@@ -23,6 +23,15 @@ export interface CatalogItem {
   enabled?: boolean;
   supportLevel?: 'verified' | 'pending';
   supportedSystems?: string[];
+  requirements?: {
+    os: string[];
+    minRamMb: number;
+    minDiskMb?: number;
+    systemd: boolean;
+    network: boolean;
+    architectures?: string[];
+    autoInstallDependencies?: string[];
+  };
 }
 
 export interface ServerDraft {

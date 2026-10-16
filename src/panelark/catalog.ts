@@ -14,6 +14,16 @@ import {
 import type { CatalogItem, View } from './types';
 import type { PanelAdapterMetadata } from './api';
 
+const dockerPanelSystems = ['Ubuntu/Debian', 'RHEL family'];
+const dockerPanelRequirements: NonNullable<CatalogItem['requirements']> = {
+  os: ['linux'],
+  minRamMb: 512,
+  systemd: true,
+  network: true,
+  architectures: ['amd64', 'arm64'],
+  autoInstallDependencies: ['Docker Engine', 'Docker Compose'],
+};
+
 export const panels: CatalogItem[] = [
   {
     id: '1panel', adapterId: '1panel', name: '1Panel', category: '服务器面板', icon: PanelTop, accent: 'gold',
@@ -48,22 +58,22 @@ export const panels: CatalogItem[] = [
   {
     id: 'portainer', adapterId: 'portainer', name: 'Portainer', category: 'Docker 面板', icon: Container, accent: 'violet',
     description: '简洁可靠的 Docker 与容器环境可视化管理平台。',
-    version: 'CE LTS', memory: '512 MB+', port: '9443', kind: 'panel',
+    version: 'CE LTS', memory: '512 MB+', port: '9443', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
   },
   {
     id: 'npm', adapterId: 'npm', name: 'Nginx Proxy Manager', category: 'Docker 面板', icon: Globe2, accent: 'sage',
     description: '通过友好界面管理反向代理、证书与访问策略。',
-    version: 'Latest', memory: '1 GB+', port: '81', kind: 'panel',
+    version: 'Latest', memory: '1 GB+', port: '81', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: { ...dockerPanelRequirements, minRamMb: 1024 },
   },
   {
     id: 'nezha', adapterId: 'nezha', name: '哪吒监控', category: '监控面板', icon: Activity, accent: 'rose',
     description: '轻量服务器监控面板与 Agent 管理中心。',
-    version: 'Stable', memory: '512 MB+', port: '8008', kind: 'panel',
+    version: 'Stable', memory: '512 MB+', port: '8008', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
   },
   {
     id: 'uptime-kuma', adapterId: 'uptime-kuma', name: 'Uptime Kuma', category: '监控面板', icon: Activity, accent: 'sage',
     description: '部署独立的服务可用性监控面板与公开状态页。',
-    version: 'Latest', memory: '512 MB+', port: '3001', kind: 'panel',
+    version: 'Latest', memory: '512 MB+', port: '3001', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
   },
   {
     id: 'marzban', adapterId: 'marzban', name: 'Marzban', category: '代理面板', icon: ShieldCheck, accent: 'gold',
@@ -141,6 +151,7 @@ export function adapterMetadataToCatalog(items: PanelAdapterMetadata[]): Catalog
     enabled: item.enabled,
     supportLevel: item.supportLevel,
     supportedSystems: item.supportedSystems,
+    requirements: item.requirements,
   }));
 }
 

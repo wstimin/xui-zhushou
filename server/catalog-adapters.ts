@@ -30,6 +30,7 @@ export interface CatalogAdapterDefinition {
   accessProtocol?: "http" | "https";
   exposeAccessUrl?: boolean;
   requiredCommands?: string[];
+  autoInstallCommands?: string[];
   compatibility?: (environment: Record<string, any>) => string | undefined;
   result?: (payload: Record<string, any>, host: string, verification: string) => Record<string, unknown>;
 }
@@ -261,37 +262,40 @@ const definitions: CatalogAdapterDefinition[] = [
     compatibility: environment => ["ubuntu", "debian"].includes(String(environment.osId || "").toLowerCase()) ? undefined : "CasaOS 官方安装器仅在 Ubuntu/Debian 上启用",
   },
   {
-    metadata: metadata({ ...panelBase, id: "portainer", name: "Portainer", category: "Docker 面板", accent: "blue", version: "CE LTS", memory: "512 MB+", port: "9443", description: "Docker 与容器环境的可视化管理平台。", supportedSystems: ["Docker Engine"], requirements: { os: ["linux"], minRamMb: 512, systemd: false, network: true }, capabilities: ["ssh-install", "docker", "container-verification"] }),
+    metadata: metadata({ ...panelBase, id: "portainer", name: "Portainer", category: "Docker 面板", accent: "blue", version: "CE LTS", memory: "512 MB+", port: "9443", description: "Docker 与容器环境的可视化管理平台。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "container-verification"] }),
     installCommand: persistentContainer("portainer", "docker volume create portainer_data >/dev/null && docker run -d --name portainer --restart=always -p 8000:8000 -p 9443:9443 -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:lts"),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E '^portainer$'",
     verifyOutput: /portainer/m,
     accessProtocol: "https",
     requiredCommands: ["docker"],
+    autoInstallCommands: ["docker"],
   },
   {
-    metadata: metadata({ ...panelBase, id: "npm", name: "Nginx Proxy Manager", category: "Docker 面板", accent: "sage", version: "Latest", memory: "1 GB+", port: "81", description: "通过 Web 界面管理反向代理、证书和访问策略。", supportedSystems: ["Docker Engine"], requirements: { os: ["linux"], minRamMb: 1024, systemd: false, network: true }, capabilities: ["ssh-install", "docker", "proxy", "certificate"] }),
+    metadata: metadata({ ...panelBase, id: "npm", name: "Nginx Proxy Manager", category: "Docker 面板", accent: "sage", version: "Latest", memory: "1 GB+", port: "81", description: "通过 Web 界面管理反向代理、证书和访问策略。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "proxy", "certificate"] }),
     installCommand: persistentContainer("npm", "docker volume create npm_data >/dev/null && docker volume create npm_letsencrypt >/dev/null && docker run -d --name npm --restart=always -p 80:80 -p 81:81 -p 443:443 -v npm_data:/data -v npm_letsencrypt:/etc/letsencrypt jc21/nginx-proxy-manager:latest"),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E '^npm$'",
     verifyOutput: /npm/m,
     accessProtocol: "http",
     requiredCommands: ["docker"],
-    compatibility: environment => ["x86_64", "amd64", "aarch64", "arm64"].includes(String(environment.arch || "").toLowerCase()) ? undefined : "Nginx Proxy Manager 仅支持 amd64 或 arm64 架构",
+    autoInstallCommands: ["docker"],
   },
   {
-    metadata: metadata({ ...panelBase, id: "nezha", name: "哪吒监控", category: "监控面板", accent: "rose", version: "Stable", memory: "512 MB+", port: "8008", description: "轻量服务器监控面板与 Agent 管理中心。", supportedSystems: ["Docker Engine"], requirements: { os: ["linux"], minRamMb: 512, systemd: false, network: true }, capabilities: ["ssh-install", "docker", "container-verification"] }),
+    metadata: metadata({ ...panelBase, id: "nezha", name: "哪吒监控", category: "监控面板", accent: "rose", version: "Stable", memory: "512 MB+", port: "8008", description: "轻量服务器监控面板与 Agent 管理中心。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "container-verification"] }),
     installCommand: payload => nezhaInstallCommand(payload),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E '^nezha-dashboard$'",
     verifyOutput: /nezha-dashboard/m,
     accessProtocol: "http",
     requiredCommands: ["docker"],
+    autoInstallCommands: ["docker"],
   },
   {
-    metadata: metadata({ ...panelBase, id: "uptime-kuma", name: "Uptime Kuma", category: "监控面板", accent: "violet", version: "Latest", memory: "512 MB+", port: "3001", description: "自托管服务可用性监控和状态页。", supportedSystems: ["Docker Engine"], requirements: { os: ["linux"], minRamMb: 512, systemd: false, network: true }, capabilities: ["ssh-install", "docker", "health-check"] }),
+    metadata: metadata({ ...panelBase, id: "uptime-kuma", name: "Uptime Kuma", category: "监控面板", accent: "violet", version: "Latest", memory: "512 MB+", port: "3001", description: "自托管服务可用性监控和状态页。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "health-check"] }),
     installCommand: persistentContainer("uptime-kuma", "docker volume create uptime_kuma >/dev/null && docker run -d --name uptime-kuma --restart=unless-stopped -p 3001:3001 -v uptime_kuma:/app/data louislam/uptime-kuma:2"),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E '^uptime-kuma$'",
     verifyOutput: /uptime-kuma/m,
     accessProtocol: "http",
     requiredCommands: ["docker"],
+    autoInstallCommands: ["docker"],
   },
   {
     metadata: metadata({ ...toolBase, id: "docker", name: "Docker Engine", category: "容器环境", accent: "blue", version: "Stable", memory: "512 MB+", port: "无需端口", description: "安装 Docker Engine 与 Compose 并完成版本验证。", capabilities: ["ssh-install", "runtime", "compose"] }),
@@ -366,6 +370,11 @@ class CatalogAdapter implements PanelAdapter {
         if (details.totalRamMb && details.totalRamMb < minimumReportedRamMb) throw new Error(`${this.metadata.name} 至少需要 ${requirements.minRamMb}MB 内存`);
         if (requirements.minDiskMb && details.diskFreeMb < requirements.minDiskMb) throw new Error(`${this.metadata.name} 至少需要 ${requirements.minDiskMb}MB 可用磁盘空间`);
         if (requirements.systemd && !details.systemdAvailable) throw new Error(`${this.metadata.name} 要求 systemd 作为 PID 1`);
+        const architectureAliases: Record<string, string> = { x86_64: "amd64", aarch64: "arm64" };
+        const detectedArchitecture = architectureAliases[String(details.arch || "").toLowerCase()] || String(details.arch || "").toLowerCase();
+        if (requirements.architectures?.length && !requirements.architectures.includes(detectedArchitecture)) {
+          throw new Error(`${this.metadata.name} 仅支持 ${requirements.architectures.join(" 或 ")} 架构，当前为 ${details.arch || "未知"}`);
+        }
         const compatibilityError = this.definition.compatibility?.(details as Record<string, any>);
         if (compatibilityError) throw new Error(compatibilityError);
         if (!details.isRoot) {
@@ -374,7 +383,23 @@ class CatalogAdapter implements PanelAdapter {
         }
         if (this.definition.requiredCommands?.length) {
           const required = this.definition.requiredCommands.join(" ");
-          const check = await exec(session.client, `for command_name in ${required}; do command -v "$command_name" >/dev/null || { echo "$command_name"; exit 127; }; done`, { timeoutMs: 10_000 });
+          const checkCommand = `for command_name in ${required}; do command -v "$command_name" >/dev/null || { echo "$command_name"; exit 127; }; done`;
+          let check = await exec(session.client, checkCommand, { timeoutMs: 10_000 });
+          const missingCommand = check.stdout.trim().split(/\s+/)[0] || "";
+          if (check.code !== 0 && missingCommand === "docker" && this.definition.autoInstallCommands?.includes("docker")) {
+            context.log(`${this.metadata.name} 未检测到 Docker，正在自动安装 Docker Engine 与 Compose`);
+            context.progress(10, "正在自动补齐 Docker 运行环境");
+            const dockerCommand = buildDockerInstallCommand(String(details.packageManager || ""), !details.isRoot);
+            const dockerInstall = await exec(session.client, dockerCommand, { timeoutMs: 20 * 60_000 });
+            if (dockerInstall.code !== 0) {
+              throw new Error(`${this.metadata.name} 所需 Docker 自动安装失败：${(dockerInstall.stderr || dockerInstall.stdout).slice(-500)}`);
+            }
+            const sudo = details.isRoot ? "" : "sudo -n ";
+            const dockerVerify = await exec(session.client, `command -v docker >/dev/null && ${sudo}docker info >/dev/null && (${sudo}docker compose version >/dev/null 2>&1 || ${sudo}docker-compose version >/dev/null 2>&1)`, { timeoutMs: 30_000 });
+            if (dockerVerify.code !== 0) throw new Error(`${this.metadata.name} 所需 Docker 已安装，但二次验证未通过`);
+            context.log("Docker Engine 与 Compose 已自动安装并验证通过");
+            check = await exec(session.client, checkCommand, { timeoutMs: 10_000 });
+          }
           if (check.code !== 0) throw new Error(`${this.metadata.name} 缺少前置命令：${check.stdout.trim() || required}`);
         }
         context.progress(20, `${this.metadata.name} 环境检查通过`);

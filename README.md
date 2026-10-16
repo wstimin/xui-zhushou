@@ -17,6 +17,8 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 ## 主要能力
 
 - 使用 SSH 密码或私钥连接 VPS，检测系统、架构、systemd、内存和权限。
+- 项目卡片与部署确认页会提前显示支持系统、最低资源、架构和自动依赖，避免开始安装后才发现限制。
+- 部署 Portainer、Nginx Proxy Manager、哪吒监控或 Uptime Kuma 时，如未检测到 Docker，服务端会自动安装并验证 Docker Engine 与 Compose 后继续部署，无需用户手工准备。
 - 安装 3x-ui，并显示精简的阶段进度，不向浏览器暴露完整脚本输出。
 - 可自定义面板管理员用户名和密码；留空时自动生成安全凭据，同时自动生成面板端口和 Web 路径。
 - 面板搭建完成后自动带入 API Token，节点创建直接调用管理 API。
@@ -77,7 +79,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.3`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.4`。
 
 ## 远端构建与发布
 
