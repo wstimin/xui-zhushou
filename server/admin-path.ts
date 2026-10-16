@@ -7,8 +7,8 @@ export function normalizeAdminPath(value: unknown): string {
   if (candidate.length > 128 || !/^\/[A-Za-z0-9][A-Za-z0-9_-]{2,63}(?:\/[A-Za-z0-9][A-Za-z0-9_-]{0,63})*$/.test(candidate)) {
     throw new Error("后台路径必须以 / 开头，每段只能包含字母、数字、下划线和短横线，首段至少 3 位");
   }
-  if (/^\/(?:api|assets)(?:\/|$)/i.test(candidate)) {
-    throw new Error("后台路径不能使用 /api 或 /assets 保留路径");
+  if (/^\/(?:api|assets|install)(?:\/|$)/i.test(candidate)) {
+    throw new Error("后台路径不能使用 /api、/assets 或 /install 保留路径");
   }
   return candidate;
 }

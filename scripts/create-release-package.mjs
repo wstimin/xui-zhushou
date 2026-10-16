@@ -12,6 +12,10 @@ const requiredFiles = [
   "package.json",
   "package-lock.json",
   "README.md",
+  "panel.cjs",
+  "Dockerfile",
+  "docker-compose.yml",
+  ".dockerignore",
 ];
 
 if (!fs.existsSync(path.join(root, "dist", "server.cjs"))) {
@@ -28,6 +32,9 @@ for (const file of requiredFiles) {
 
 fs.mkdirSync(path.join(outputDir, "scripts"), { recursive: true });
 fs.copyFileSync(path.join(root, "scripts", "apply-update.mjs"), path.join(outputDir, "scripts", "apply-update.mjs"));
+fs.copyFileSync(path.join(root, "scripts", "panel-start.mjs"), path.join(outputDir, "scripts", "panel-start.mjs"));
+fs.cpSync(path.join(root, "deploy"), path.join(outputDir, "deploy"), { recursive: true });
+fs.cpSync(path.join(root, "docs", "deployment"), path.join(outputDir, "docs", "deployment"), { recursive: true });
 fs.mkdirSync(path.join(outputDir, "docs", "panelark"), { recursive: true });
 for (const file of ["STAGE7_OPERATIONS.md", "STAGE8_RELEASE.md"]) {
   const source = path.join(root, "docs", "panelark", file);

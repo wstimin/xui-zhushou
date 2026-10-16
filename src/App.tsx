@@ -43,6 +43,8 @@ export default function App() {
   const [recommendedResources, setRecommendedResources] = useState<RecommendedResource[]>([]);
   const serverConnected = Boolean(activeServer);
 
+  useEffect(() => { document.title = publicConfig.siteName || 'PanelArk 面板方舟'; }, [publicConfig.siteName]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {

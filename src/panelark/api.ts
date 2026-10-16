@@ -1,4 +1,6 @@
 export interface PublicConfig {
+  siteName?: string;
+  siteUrl?: string;
   purchaseEnabled: boolean;
   purchaseButtonText: string;
   purchaseUrl: string;

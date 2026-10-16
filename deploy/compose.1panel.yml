@@ -1,0 +1,12 @@
+# docker compose -f docker-compose.yml -f deploy/compose.1panel.yml up -d --build
+# Set PANELARK_PROXY_NETWORK to the actual OpenResty network in the panel.
+services:
+  panelark:
+    networks:
+      proxy:
+        aliases:
+          - panelark-app
+networks:
+  proxy:
+    external: true
+    name: "${PANELARK_PROXY_NETWORK:?Set the existing OpenResty Docker network name}"

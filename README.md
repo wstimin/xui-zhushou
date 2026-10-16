@@ -2,6 +2,19 @@
 
 PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平台，已完成真实 CDK 商业授权、安全 SSH 预检、持久化任务引擎、多面板适配器、运营后台、加密迁移和签名在线更新闭环。
 
+## 部署方式与网页安装
+
+支持一键脚本，也支持在 **宝塔 / 1Panel 上传项目后启动 Node.js、绑定域名，再打开网页安装向导**。首次访问首页会自动进入 `/install`，检查环境后填写站点信息、安装令牌和管理员账号，完成后自动登录后台并锁定安装入口。使用内置 SQLite，无需另装 MySQL。
+
+- [完整部署文档](docs/deployment/README.md)
+- [宝塔上传与域名部署](docs/deployment/BT.md)
+- [1Panel Node / Compose 部署](docs/deployment/1PANEL.md)
+- [Docker Compose 部署](docs/deployment/DOCKER.md)
+- [备份、更新与故障排查](docs/deployment/OPERATIONS.md)
+- [下载面板上传包 xui-zhushou-panel.zip](https://github.com/wstimin/xui-zhushou/releases/latest/download/xui-zhushou-panel.zip)
+
+面板项目选择 Node.js 24 LTS，启动脚本 `panel:start`（`npm run panel:start`），或直接选择启动文件 `panel.cjs`。源码缺少 `dist` 时首次启动会自动构建；Release 上传包已经预编译，仅安装生产依赖。绑定域名前请先配置好 Node 项目或容器运行环境，不能只创建静态/PHP网站。
+
 ## PanelArk 管理后台与 CDK
 
 - 用户端地址：`http://服务器IP:1888/`
@@ -79,7 +92,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.9`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.2.0`。
 
 后台在线更新会校验签名、创建加密备份，再由独立的 systemd 临时服务完成切换、健康检查和失败回滚。生产安装需保留 systemd、PM2 与 Node.js 24 LTS 的可用性。v2.1.7 及更早版本请先运行一次 `sy install`，安装独立更新执行器修复；之后可使用后台在线更新。
 

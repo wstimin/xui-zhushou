@@ -4,6 +4,7 @@ import { createHash, verify } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { saveBackup } from "./panelark-backup.js";
 import { PanelArkDatabase } from "./panelark-db.js";
+import { applicationUpdatePolicy } from "./setup.js";
 
 export type UpdateChannel = "stable" | "beta";
 export type UpdatePhase = "idle" | "checking" | "available" | "current" | "downloading" | "prepared" | "applying" | "restarting" | "completed" | "rolled_back" | "failed";
@@ -163,6 +164,7 @@ export class PanelArkUpdateManager {
   }
 
   async prepare(passphrase: string, adminId: string) {
+    if (!applicationUpdatePolicy().applicationUpdateSupported) throw new Error(applicationUpdatePolicy().applicationUpdateHint);
     const state = this.status();
     if (state.phase !== "available" || !state.manifest) throw new Error("请先检查并确认存在可用更新");
     this.write({ phase: "downloading", progress: 25, message: "正在创建更新前加密备份" });
@@ -211,6 +213,7 @@ export class PanelArkUpdateManager {
   }
 
   apply() {
+    if (!applicationUpdatePolicy().applicationUpdateSupported) throw new Error(applicationUpdatePolicy().applicationUpdateHint);
     const state = this.status();
     if (state.phase !== "prepared" || !state.archivePath || !state.targetVersion) throw new Error("没有已验证并等待应用的更新包");
     if (process.platform !== "linux" || process.env.NODE_ENV !== "production") throw new Error("在线应用更新只允许在 Linux 生产环境执行");

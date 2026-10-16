@@ -12,6 +12,7 @@ import { backupFilePath, backupLimits, backupPreview, createBackupArchive, decry
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
 import { normalizeAdminPath, readAdminPath } from "./admin-path.js";
+import { applicationUpdatePolicy, installationRequired, installationSettings, installationStatus } from "./setup.js";
 import {
   generateCdkCode,
   generateTotpSecret,
@@ -61,7 +62,7 @@ function sendError(res: Response, error: unknown, status = 400) {
 }
 
 function setSessionCookie(req: Request, res: Response, token: string) {
-  const secure = req.secure || req.header("x-forwarded-proto") === "https";
+  const secure = req.secure;
   res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/api/admin; HttpOnly; SameSite=Strict; Priority=High; Max-Age=${SESSION_HOURS * 3600}${secure ? "; Secure" : ""}`);
 }
 
@@ -167,9 +168,11 @@ function seedCatalog(db: PanelArkDatabase) {
 }
 
 function getPublicSettings(db: PanelArkDatabase) {
-  const rows = db.all<DbRow>("SELECT key, value FROM site_settings WHERE key IN ('purchase_enabled','purchase_button_text','purchase_url','support_url','site_notice')");
+  const rows = db.all<DbRow>("SELECT key, value FROM site_settings WHERE key IN ('purchase_enabled','purchase_button_text','purchase_url','support_url','site_notice','site_name','site_url')");
   const values = Object.fromEntries(rows.map(row => [String(row.key), String(row.value)]));
   return {
+    siteName: values.site_name || "PanelArk 面板方舟",
+    siteUrl: values.site_url || "",
     purchaseEnabled: values.purchase_enabled !== "false",
     purchaseButtonText: values.purchase_button_text || "购买 CDK",
     purchaseUrl: values.purchase_url || "",
@@ -218,6 +221,8 @@ export async function mountPanelArkApi(app: Express) {
   const cdkLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
 
   const remoteApi = mountPanelArkRemoteApi(router, db);
+
+  router.get("/setup/status", (_req, res) => res.json(installationStatus(db, dataDirectory)));
 
   router.get("/adapters", (_req, res) => {
     res.json({ success: true, items: catalogItems(db).filter(item => item.enabled) });
@@ -476,18 +481,26 @@ export async function mountPanelArkApi(app: Express) {
       if (!expected || !safeEqualString(sha256(text(req.body?.setupToken, 300)), String(expected.value))) throw new Error("初始化令牌无效");
       const username = normalizeUsername(req.body?.username);
       const password = validatePassword(req.body?.password);
+      const installation = req.body?.installation === undefined ? undefined : installationSettings(req.body.installation);
+      if (installation && !installationStatus(db, dataDirectory).ready) throw new Error("运行环境检查未通过，不能完成安装");
       const adminId = randomUUID();
       const timestamp = now();
       const passwordHash = await hashPassword(password);
       db.transaction(() => {
+        if (!installationRequired(db)) throw new Error("管理员已经初始化，安装入口已锁定");
         db.run("INSERT INTO admins(id, username, password_hash, role, created_at, updated_at, password_changed_at) VALUES (?, ?, ?, 'super_admin', ?, ?, ?)", [adminId, username, passwordHash, timestamp, timestamp, timestamp]);
         db.run("DELETE FROM site_settings WHERE key = 'admin_setup_token_hash'");
+        if (installation) {
+          for (const [key, value] of Object.entries({ site_name: installation.siteName, site_url: installation.siteUrl, admin_path: installation.adminPath, installation_completed_at: timestamp })) {
+            db.run("INSERT OR REPLACE INTO site_settings(key, value, updated_at) VALUES (?, ?, ?)", [key, value, timestamp]);
+          }
+        }
       });
       fs.rmSync(path.join(dataDirectory, "admin-setup-token.txt"), { force: true });
       const session = createSession(db, req, adminId);
       setSessionCookie(req, res, session.token);
       audit(db, req, "admin.bootstrap", "admin", adminId, { username }, adminId);
-      res.json({ success: true, csrfToken: session.csrfToken, admin: { id: adminId, username, role: "super_admin", totpEnabled: false } });
+      res.json({ success: true, csrfToken: session.csrfToken, adminPath: readAdminPath(db), admin: { id: adminId, username, role: "super_admin", totpEnabled: false } });
     } catch (error) { sendError(res, error); }
   });
 
@@ -860,7 +873,7 @@ export async function mountPanelArkApi(app: Express) {
   router.get("/admin/update/status", requirePermission("*"), (_req, res) => {
     const state = updateManager.status();
     const adapterVersion = db.get<DbRow>("SELECT value FROM site_settings WHERE key = 'adapter_catalog_version'");
-    res.json({ success: true, state, adapterCatalogVersion: String(adapterVersion?.value || "built-in"), signingConfigured: Boolean(loadUpdatePublicKey(dataDirectory)) });
+    res.json({ success: true, state, ...applicationUpdatePolicy(), adapterCatalogVersion: String(adapterVersion?.value || "built-in"), signingConfigured: Boolean(loadUpdatePublicKey(dataDirectory)) });
   });
 
   router.get("/admin/security/report", requirePermission("*"), (_req, res) => {

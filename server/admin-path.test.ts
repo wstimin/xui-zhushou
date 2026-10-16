@@ -8,6 +8,7 @@ test("admin path normalization accepts safe nested paths and rejects reserved pa
   assert.throws(() => normalizeAdminPath("admin"), /必须以 \/ 开头/);
   assert.throws(() => normalizeAdminPath("/api/admin"), /保留路径/);
   assert.throws(() => normalizeAdminPath("/assets/admin"), /保留路径/);
+  assert.throws(() => normalizeAdminPath("/install"), /保留路径/);
 });
 
 test("admin page matching does not expose the previous or similar path", () => {

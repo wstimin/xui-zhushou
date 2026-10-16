@@ -13,6 +13,7 @@ import { findInboundRecord, isRetryablePanelConnectionError, parseApiTokenFromOu
 import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
 import { mountPanelArkApi } from "./server/panelark-api.js";
 import { isAdminPagePath, markAdminHtml, readAdminPath } from "./server/admin-path.js";
+import { installationRequired } from "./server/setup.js";
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -144,6 +145,7 @@ function parseInstallerResult(output: string): Record<string, string> {
 async function startServer() {
   const app = express();
   const port = validPort(process.env.PORT, 1888);
+  const host = process.env.HOST || "0.0.0.0";
   const production = process.env.NODE_ENV === "production";
   const httpsConfigured = Boolean(optionalString(process.env.SSL_CERT) && optionalString(process.env.SSL_KEY));
 
@@ -173,7 +175,7 @@ async function startServer() {
   app.use((req, res, next) => {
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("X-Request-Id", req.header("x-request-id")?.slice(0, 80) || randomUUID());
-    if (production && process.env.PANELARK_REQUIRE_HTTPS === "true" && !(req.secure || req.header("x-forwarded-proto") === "https")) {
+    if (production && process.env.PANELARK_REQUIRE_HTTPS === "true" && !req.secure) {
       return res.status(426).json({ success: false, error: "生产环境要求通过 HTTPS 访问" });
     }
     next();
@@ -191,6 +193,16 @@ async function startServer() {
   });
 
   const panelArk = await mountPanelArkApi(app);
+
+  app.use((req, res, next) => {
+    if (req.method === "GET" && (req.path === "/" || isAdminPagePath(req.path, readAdminPath(panelArk.db))) && installationRequired(panelArk.db)) {
+      return res.redirect(302, "/install");
+    }
+    next();
+  });
+  const pageHtml = (html: string, requestPath: string) => requestPath === "/install"
+    ? html.replace('id="root"', 'id="root" data-panelark-view="setup"')
+    : markAdminHtml(html, isAdminPagePath(requestPath, readAdminPath(panelArk.db)));
 
   app.use("/api", requireAppAuth);
 
@@ -690,9 +702,9 @@ async function startServer() {
     const vite = await createViteServer({ server: { middlewareMode: true, allowedHosts: true }, appType: "spa" });
     const sourceHtml = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
     app.use(async (req, res, next) => {
-      if (req.method !== "GET" || !isAdminPagePath(req.path, readAdminPath(panelArk.db))) return next();
+      if (req.method !== "GET" || (req.path !== "/install" && !isAdminPagePath(req.path, readAdminPath(panelArk.db)))) return next();
       try {
-        const html = await vite.transformIndexHtml(req.originalUrl, markAdminHtml(sourceHtml, true));
+        const html = await vite.transformIndexHtml(req.originalUrl, pageHtml(sourceHtml, req.path));
         res.status(200).type("html").send(html);
       } catch (error) {
         vite.ssrFixStacktrace(error as Error);
@@ -705,8 +717,7 @@ async function startServer() {
     const indexHtml = fs.readFileSync(path.join(distPath, "index.html"), "utf8");
     app.use(express.static(distPath, { index: false }));
     app.get("*", (req, res) => {
-      const admin = isAdminPagePath(req.path, readAdminPath(panelArk.db));
-      res.status(200).type("html").send(markAdminHtml(indexHtml, admin));
+      res.status(200).type("html").send(pageHtml(indexHtml, req.path));
     });
   }
 
@@ -716,9 +727,9 @@ async function startServer() {
     const server = https.createServer({ cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }, app);
     server.keepAliveTimeout = 120_000;
     server.headersTimeout = 125_000;
-    server.listen(port, "0.0.0.0", () => console.log(`[HTTPS] PanelArk: https://0.0.0.0:${port}`));
+    server.listen(port, host, () => console.log(`[HTTPS] PanelArk: https://${host}:${port}`));
   } else {
-    const server = app.listen(port, "0.0.0.0", () => console.log(`[HTTP] PanelArk: http://0.0.0.0:${port}`));
+    const server = app.listen(port, host, () => console.log(`[HTTP] PanelArk: http://${host}:${port}`));
     server.keepAliveTimeout = 120_000;
     server.headersTimeout = 125_000;
   }

@@ -1,0 +1,15 @@
+services:
+  panelark:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PANELARK_BIND_ADDRESS:-127.0.0.1}:${PANELARK_PORT:-1888}:1888"
+    environment:
+      PANELARK_DEPLOYMENT_MODE: docker
+      PANELARK_DATA_DIR: /app/data
+      PANELARK_TRUST_PROXY: "true"
+      PANELARK_SETUP_TOKEN: "${PANELARK_SETUP_TOKEN:-}"
+    volumes:
+      - panelark-data:/app/data
+volumes:
+  panelark-data:
