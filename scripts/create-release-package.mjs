@@ -36,7 +36,8 @@ fs.copyFileSync(path.join(root, "scripts", "panel-start.mjs"), path.join(outputD
 fs.cpSync(path.join(root, "deploy"), path.join(outputDir, "deploy"), { recursive: true });
 fs.cpSync(path.join(root, "docs", "deployment"), path.join(outputDir, "docs", "deployment"), { recursive: true });
 fs.mkdirSync(path.join(outputDir, "docs", "panelark"), { recursive: true });
-for (const file of ["STAGE7_OPERATIONS.md", "STAGE8_RELEASE.md"]) {
+const acceptanceDocs = fs.readdirSync(path.join(root, "docs", "panelark")).filter(file => /^ACCEPTANCE_[0-9.]+\.md$/.test(file));
+for (const file of ["STAGE7_OPERATIONS.md", "STAGE8_RELEASE.md", ...acceptanceDocs]) {
   const source = path.join(root, "docs", "panelark", file);
   if (fs.existsSync(source)) fs.copyFileSync(source, path.join(outputDir, "docs", "panelark", file));
 }

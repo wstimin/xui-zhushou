@@ -267,7 +267,7 @@ export function parseServerInspectionOutput(
   if (values.get("CURL") !== "yes") warnings.push("服务器尚未安装 curl，安装脚本可能无法启动。");
   const totalRamMb = Math.round(Number(values.get("RAM_KB") || 0) / 1024);
   if (totalRamMb && totalRamMb < 512) warnings.push("服务器内存低于 512MB，建议先配置 Swap。");
-  if (!systemdAvailable) warnings.push("当前系统未运行 systemd，无法安装 x-ui 系统服务。");
+  if (!systemdAvailable) warnings.push("当前系统未运行 systemd，无法安装依赖 systemd 的面板和服务。");
   return {
     targetHost: session.host,
     sshPort: session.port,
@@ -303,6 +303,10 @@ export async function inspectServer(
     "printf '__OS_ID__=%s\\n' \"${ID:-unknown}\"",
     "printf '__OS_VERSION__=%s\\n' \"${VERSION_ID:-unknown}\"",
     "printf '__ARCH__='; uname -m",
+    "printf '__KERNEL__='; uname -sr",
+    "printf '__GLIBC__='; ldd --version 2>/dev/null | head -n1",
+    "printf '__SYSTEMD__='; systemctl --version 2>/dev/null | head -n1",
+    "printf '__CPU__='; getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1",
     "printf '__SYSTEMD_ACTIVE__='; if [ \"$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ')\" = systemd ] && [ -d /run/systemd/system ]; then echo yes; else echo no; fi",
     "printf '__RAM_KB__='; awk '/MemTotal/{print $2}' /proc/meminfo",
     "printf '__FREE_KB__='; awk '/MemAvailable/{print $2}' /proc/meminfo",

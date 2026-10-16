@@ -25,6 +25,8 @@ const dockerPanelRequirements: NonNullable<CatalogItem['requirements']> = {
   architectures: ['amd64', 'arm64'],
   autoInstallDependencies: ['Docker Engine', 'Docker Compose'],
 };
+const aiPanelSystems = ['Ubuntu 20.04+', 'Debian 11+', 'Rocky/AlmaLinux 8+', 'CentOS Stream 9+'];
+const aiPanelRequirements = { ...dockerPanelRequirements, minDiskMb: 1024 };
 
 export const panels: CatalogItem[] = [
   {
@@ -39,10 +41,11 @@ export const panels: CatalogItem[] = [
   },
   {
     id: 'bt-panel', adapterId: 'bt-panel', name: '宝塔 Linux 面板', category: '建站面板', icon: PanelTop, accent: 'gold',
-    description: '宝塔官方中文版，安装后自动读取安全入口与完整面板信息。',
-    version: '12 Stable', memory: '1 GB+ / 5 GB 可用磁盘', port: '随机安全端口', featured: true, kind: 'panel',
-    supportedSystems: ['Ubuntu 20.04+', 'Debian 11+', 'CentOS/RHEL/Alma/Rocky 9+'],
-    requirements: { os: ['linux'], architectures: ['amd64', 'arm64'], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true },
+    verifiedSystems: ['Debian 12 · amd64'],
+    description: '宝塔官方中文版，安装后自动读取安全入口与面板信息；建站建议预留 5 GB 以上磁盘。',
+    version: '12 Stable', memory: '1 GB+ / 1 GB 可用磁盘', port: '随机安全端口', featured: true, kind: 'panel',
+    supportedSystems: ['Ubuntu 20.04+', 'Debian 11+', 'CentOS Stream/Rocky/AlmaLinux 9+'],
+    requirements: { os: ['linux'], architectures: ['amd64'], minRamMb: 1024, minDiskMb: 1024, systemd: true, network: true },
   },
   {
     id: '3x-ui', adapterId: '3x-ui', name: '3x-ui', category: '代理面板', icon: Network, accent: 'blue',
@@ -76,18 +79,21 @@ export const panels: CatalogItem[] = [
   },
   {
     id: 'new-api', adapterId: 'new-api', name: 'New API', category: 'AI 面板', icon: Bot, accent: 'blue',
+    verifiedSystems: ['Debian 12 · amd64'],
     description: '统一管理多种大模型渠道、令牌、额度和 OpenAI 兼容接口。',
-    version: 'Latest Stable', memory: '1 GB+', port: '3000', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: { ...dockerPanelRequirements, minRamMb: 1024 },
+    version: 'Latest Stable', memory: '1 GB+', port: '3000', kind: 'panel', supportedSystems: aiPanelSystems, requirements: { ...aiPanelRequirements, minRamMb: 1024 },
   },
   {
     id: 'one-api', adapterId: 'one-api', name: 'One API', category: 'AI 面板', icon: Cpu, accent: 'sage',
+    verifiedSystems: ['Debian 12 · amd64'],
     description: '轻量的多渠道大模型 API 管理与分发面板。',
-    version: 'v0.6.10', memory: '512 MB+', port: '3002', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
+    version: 'v0.6.10', memory: '512 MB+', port: '3002', kind: 'panel', supportedSystems: aiPanelSystems, requirements: aiPanelRequirements,
   },
   {
     id: 'cliproxyapi', adapterId: 'cliproxyapi', name: 'CLIProxyAPI（CPA）', category: 'AI 面板', icon: Network, accent: 'violet',
+    verifiedSystems: ['Debian 12 · amd64'],
     description: '将已授权的 AI CLI 账号转换为 OpenAI 兼容 API，并提供 Web 管理中心。',
-    version: 'v8 Stable', memory: '512 MB+', port: '8317 / OAuth 回调', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
+    version: 'v8 Stable', memory: '512 MB+', port: '8317 / OAuth 回调', kind: 'panel', supportedSystems: aiPanelSystems, requirements: aiPanelRequirements,
   },
   {
     id: 'nezha', adapterId: 'nezha', name: '哪吒监控', category: '监控面板', icon: Activity, accent: 'rose',
@@ -191,6 +197,7 @@ export function adapterMetadataToCatalog(items: PanelAdapterMetadata[]): Catalog
     kind: item.kind,
     enabled: item.enabled,
     supportLevel: item.supportLevel,
+    verifiedSystems: item.verifiedSystems,
     supportedSystems: item.supportedSystems,
     requirements: item.requirements,
   }));

@@ -111,6 +111,57 @@ test("catalog adapter blocks CasaOS before its installer requests a TTY on low d
   assert.equal(executed, false);
 });
 
+test('Baota keeps a practical disk floor and refuses unsupported systems before running an installer', async () => {
+  for (const target of [
+    { osId: 'debian', osVersion: '12', diskFreeMb: 1300, arch: 'x86_64', allowed: true },
+    { osId: 'ubuntu', osVersion: '22.04', diskFreeMb: 1300, arch: 'x86_64', allowed: true },
+    { osId: 'rocky', osVersion: '9', diskFreeMb: 1300, arch: 'x86_64', allowed: true },
+    { osId: 'debian', osVersion: '12', diskFreeMb: 500, arch: 'x86_64', allowed: false },
+    { osId: 'debian', osVersion: '10', diskFreeMb: 1300, arch: 'x86_64', allowed: false },
+    { osId: 'ubuntu', osVersion: '18.04', diskFreeMb: 1300, arch: 'x86_64', allowed: false },
+    { osId: 'rocky', osVersion: '8', diskFreeMb: 1300, arch: 'x86_64', allowed: false },
+    { osId: 'debian', osVersion: '12', diskFreeMb: 1300, arch: 'aarch64', allowed: false },
+  ]) {
+    const commands: string[] = [];
+    const adapter = registerCatalogAdapters({
+      connect: async () => ({ client: { end() {} } }) as any,
+      inspect: async () => ({ ...target, packageManager: target.osId === 'rocky' ? 'dnf' : 'apt', totalRamMb: 977, systemdAvailable: true, isRoot: true }) as any,
+      exec: async (_client, command) => { commands.push(command); return { code: 0, stdout: 'PANELARK_BT_PORT=38888\nPANELARK_BT_PROTOCOL=https\nPANELARK_BT_INFO=\x1b[32mAccount details\x1b[0m\nHTTP 200\n', stderr: '' }; },
+    }).find(item => item.metadata.id === 'bt-panel')!;
+    const install = adapter.execute('install', context({ ipOrDomain: '198.51.100.61' }));
+    if (target.allowed) {
+      const result = await install as any;
+      assert.equal(result.accessUrl, 'https://198.51.100.61:38888');
+      assert.equal(result.installInfo, 'Account details');
+      assert.equal(commands.length, 3);
+    } else {
+      await assert.rejects(install, /可用磁盘|稳定版适配器仅开放|仅支持 amd64/);
+      assert.equal(commands.length, 0);
+    }
+  }
+});
+
+test('AI adapters reject unsupported operating systems and insufficient disk without downloading packages', async () => {
+  for (const id of ['new-api', 'one-api', 'cliproxyapi']) {
+    for (const target of [
+      { osId: 'centos', osVersion: '8', diskFreeMb: 2000 },
+      { osId: 'alpine', osVersion: '3.20', diskFreeMb: 2000 },
+      { osId: 'fedora', osVersion: '40', diskFreeMb: 2000 },
+      { osId: 'debian', osVersion: '10', diskFreeMb: 2000 },
+      { osId: 'debian', osVersion: '12', diskFreeMb: 300 },
+    ]) {
+      let executed = false;
+      const adapter = registerCatalogAdapters({
+        connect: async () => ({ client: { end() {} } }) as any,
+        inspect: async () => ({ ...target, packageManager: 'apt', totalRamMb: 2048, systemdAvailable: true, isRoot: true, arch: 'x86_64' }) as any,
+        exec: async () => { executed = true; return { code: 0, stdout: '', stderr: '' }; },
+      }).find(item => item.metadata.id === id)!;
+      await assert.rejects(adapter.execute('install', context({ ipOrDomain: '198.51.100.62' })), /AI 面板自动安装仅开放|可用磁盘/);
+      assert.equal(executed, false);
+    }
+  }
+});
+
 test("every published catalog adapter passes its controlled install and verify path", async () => {
   const commonOutput = "active\n1.2.3\nmarzban\nportainer\nnpm\nnezha-dashboard\nuptime-kuma\nbbr\n/swapfile\ncertbot 2.0\nPANELARK_BT_PORT=38888\nPANELARK_BT_PATH=/safe-entry\nPANELARK_BT_INFO=address and credentials\npanelark-new-api\npanelark-one-api\npanelark-cliproxyapi\nHTTP 200\nPANELARK_CPA_MANAGEMENT_KEY=CPA_test\nPANELARK_CPA_API_KEY=sk-cpa-test\n";
   const commands: string[] = [];

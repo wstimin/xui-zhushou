@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Added Baota Linux Panel to the website panel category|Added New API, One API and CLIProxyAPI to the AI panel category|Docker dependencies, ports, persistence and post-install verification are handled automatically"
+          PANELARK_RELEASE_NOTES: "Baota, New API, One API and CLIProxyAPI passed live Debian 12 amd64 installation and authentication tests|Corrected Baota disk preflight and system inspection fields|Catalog now distinguishes tested systems from declared compatibility and rejects unsupported AI hosts"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

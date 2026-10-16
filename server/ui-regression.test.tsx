@@ -24,6 +24,14 @@ test('AI project ports are configurable and CPA callback ports cannot collide wi
   assert.throws(() => deploymentPorts(cpa, '8085', false, ''), /OAuth 回调端口/);
   assert.deepEqual(deploymentPorts(panels.find(item => item.id === 'bt-panel')!, '28641', false, ''), []);
 });
+
+test('catalog distinguishes a tested system from the wider declared compatibility range', () => {
+  const html = renderToStaticMarkup(<CatalogPage items={panels.filter(item => item.id === 'new-api')} title="面板目录" eyebrow="Catalog" description="test" deploymentUnlocked={false} serverConnected={false} purchaseEnabled={false} purchaseButtonText="购买 CDK" onDeploy={noop} onConnect={noop} />);
+  assert.match(html, /部分系统已验收/);
+  assert.match(html, /Debian 12 · amd64/);
+  assert.match(html, /其他系统待验收/);
+  assert.doesNotMatch(html, />实机已验证</);
+});
 test('all brand surfaces use the shared PanelArk symbol and favicon', () => {
   const symbol = renderToStaticMarkup(<PanelArkMark size={24} aria-label="PanelArk" />);
   assert.match(symbol, /data-panelark-mark=""/);

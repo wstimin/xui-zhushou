@@ -214,8 +214,17 @@ function btPanelCompatibility(environment: Record<string, any>) {
   const id = String(environment.osId || '').toLowerCase();
   const major = Number.parseInt(String(environment.osVersion || ''), 10);
   if ((id === 'debian' && major >= 11) || (id === 'ubuntu' && major >= 20)
-    || (['centos', 'rhel', 'almalinux', 'rocky'].includes(id) && major >= 9)) return undefined;
-  return '宝塔稳定版适配器仅开放 Debian 11+、Ubuntu 20.04+ 或 CentOS/RHEL/Alma/Rocky 9+；请使用干净系统';
+    || (['centos', 'almalinux', 'rocky'].includes(id) && major >= 9)) return undefined;
+  return '宝塔稳定版适配器仅开放 Debian 11+、Ubuntu 20.04+ 或 CentOS Stream/Alma/Rocky 9+；请使用干净系统';
+}
+
+function aiPanelCompatibility(environment: Record<string, any>) {
+  const minimums: Record<string, number> = { ubuntu: 20.04, debian: 11, centos: 9, rocky: 8, almalinux: 8, alma: 8 };
+  const os = String(environment.osId || '').toLowerCase();
+  const version = Number.parseFloat(String(environment.osVersion || ''));
+  return minimums[os] && Number.isFinite(version) && version >= minimums[os]
+    ? undefined
+    : 'AI 面板自动安装仅开放 Ubuntu 20.04+、Debian 11+、Rocky/AlmaLinux 8+、CentOS Stream 9+；不支持任意系统';
 }
 
 function btPanelVerifyCommand() {
@@ -234,7 +243,8 @@ function btPanelVerifyCommand() {
 }
 
 function markerValue(output: string, key: string) {
-  return output.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim() || undefined;
+  const plain = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return plain.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim() || undefined;
 }
 
 function steps() {
@@ -249,6 +259,7 @@ function steps() {
 function metadata(base: Omit<PanelAdapterMetadata, "operations" | "steps" | "form">): PanelAdapterMetadata {
   return {
     ...base,
+    ...(['bt-panel', 'new-api', 'one-api', 'cliproxyapi'].includes(base.id) ? { verifiedSystems: ['Debian 12 · amd64'] } : {}),
     operations: ["install"],
     form: [
       { key: "serverSessionId", label: "已确认的服务器会话", type: "text", required: true },
@@ -344,7 +355,7 @@ const definitions: CatalogAdapterDefinition[] = [
     }),
   },
   {
-    metadata: metadata({ ...panelBase, id: "bt-panel", name: "宝塔 Linux 面板", category: "建站面板", accent: "gold", version: "12 Stable", memory: "1 GB+ / 5 GB 可用磁盘", port: "随机安全端口", description: "宝塔官方中文版 Linux 运维面板；自动读取安装后的安全入口与完整面板信息。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS/RHEL/Alma/Rocky 9+"], requirements: { os: ["linux"], architectures: ["amd64", "arm64"], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true } }),
+    metadata: metadata({ ...panelBase, id: "bt-panel", name: "宝塔 Linux 面板", category: "建站面板", accent: "gold", version: "12 Stable", memory: "1 GB+ / 1 GB 可用磁盘", port: "随机安全端口", description: "宝塔官方中文版 Linux 运维面板；自动读取安全入口与面板信息，建站建议预留 5 GB 以上磁盘。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS Stream/Rocky/AlmaLinux 9+"], requirements: { os: ["linux"], architectures: ["amd64"], minRamMb: 1024, minDiskMb: 1024, systemd: true, network: true } }),
     installCommand: () => btPanelInstallCommand(),
     verifyCommand: () => btPanelVerifyCommand(),
     verifyOutput: /PANELARK_BT_PORT=\d+[\s\S]*HTTP (?:200|302)/m,
@@ -393,10 +404,11 @@ const definitions: CatalogAdapterDefinition[] = [
     autoInstallCommands: ["docker"],
   },
   {
-    metadata: metadata({ ...panelBase, id: "new-api", name: "New API", category: "AI 面板", accent: "blue", version: "Latest Stable", memory: "1 GB+", port: "3000", description: "统一管理多种大模型渠道、令牌、额度和兼容 OpenAI 的 API 接口。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
+    metadata: metadata({ ...panelBase, id: "new-api", name: "New API", category: "AI 面板", accent: "blue", version: "Latest Stable", memory: "1 GB+", port: "3000", description: "统一管理多种大模型渠道、令牌、额度和兼容 OpenAI 的 API 接口。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "Rocky/AlmaLinux 8+", "CentOS Stream 9+"], requirements: { os: ["linux"], minRamMb: 1024, minDiskMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
     installCommand: payload => newApiInstallCommand(payload),
     verifyCommand: payload => dockerHttpVerifyCommand("panelark-new-api", validPort(payload.__newApiPort, 3000), "/api/status"),
     verifyOutput: /panelark-new-api[\s\S]*HTTP 200/m,
+    compatibility: aiPanelCompatibility,
     accessProtocol: "http",
     requiredCommands: ["docker", "curl"],
     autoInstallCommands: ["docker"],
@@ -407,10 +419,11 @@ const definitions: CatalogAdapterDefinition[] = [
     }),
   },
   {
-    metadata: metadata({ ...panelBase, id: "one-api", name: "One API", category: "AI 面板", accent: "sage", version: "v0.6.10", memory: "512 MB+", port: "3002", description: "轻量的多渠道大模型 API 管理与分发面板，默认使用独立持久化目录。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
+    metadata: metadata({ ...panelBase, id: "one-api", name: "One API", category: "AI 面板", accent: "sage", version: "v0.6.10", memory: "512 MB+", port: "3002", description: "轻量的多渠道大模型 API 管理与分发面板，默认使用独立持久化目录。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "Rocky/AlmaLinux 8+", "CentOS Stream 9+"], requirements: { os: ["linux"], minRamMb: 512, minDiskMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
     installCommand: payload => oneApiInstallCommand(payload),
     verifyCommand: payload => dockerHttpVerifyCommand("panelark-one-api", validPort(payload.__oneApiPort, 3002), "/api/status"),
     verifyOutput: /panelark-one-api[\s\S]*HTTP 200/m,
+    compatibility: aiPanelCompatibility,
     accessProtocol: "http",
     requiredCommands: ["docker", "curl"],
     autoInstallCommands: ["docker"],
@@ -422,10 +435,11 @@ const definitions: CatalogAdapterDefinition[] = [
     }),
   },
   {
-    metadata: metadata({ ...panelBase, id: "cliproxyapi", name: "CLIProxyAPI（CPA）", category: "AI 面板", accent: "violet", version: "v8 Stable", memory: "512 MB+", port: "8317 / OAuth 回调", description: "将已授权的 AI CLI 账号统一转换为 OpenAI 兼容 API，并提供内置 Web 管理中心。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-gateway", "oauth", "container-verification"] }),
+    metadata: metadata({ ...panelBase, id: "cliproxyapi", name: "CLIProxyAPI（CPA）", category: "AI 面板", accent: "violet", version: "v8 Stable", memory: "512 MB+", port: "8317 / OAuth 回调", description: "将已授权的 AI CLI 账号统一转换为 OpenAI 兼容 API，并提供内置 Web 管理中心。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "Rocky/AlmaLinux 8+", "CentOS Stream 9+"], requirements: { os: ["linux"], minRamMb: 512, minDiskMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-gateway", "oauth", "container-verification"] }),
     installCommand: payload => cliProxyApiInstallCommand(payload),
     verifyCommand: payload => cliProxyApiVerifyCommand(payload),
     verifyOutput: /panelark-cliproxyapi[\s\S]*HTTP 200[\s\S]*PANELARK_CPA_MANAGEMENT_KEY=/m,
+    compatibility: aiPanelCompatibility,
     sensitiveVerification: true,
     accessProtocol: "http",
     requiredCommands: ["docker", "curl", "od", "tr"],

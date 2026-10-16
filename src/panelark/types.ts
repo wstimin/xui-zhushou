@@ -22,6 +22,7 @@ export interface CatalogItem {
   kind: CatalogKind;
   enabled?: boolean;
   supportLevel?: 'verified' | 'pending';
+  verifiedSystems?: string[];
   supportedSystems?: string[];
   requirements?: {
     os: string[];

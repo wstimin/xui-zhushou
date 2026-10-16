@@ -42,6 +42,7 @@ export interface PanelAdapterMetadata {
   description: string;
   enabled: boolean;
   supportLevel: "verified" | "pending";
+  verifiedSystems?: string[];
   supportedSystems: string[];
   operations: PanelAdapterOperation[];
   capabilities: string[];
