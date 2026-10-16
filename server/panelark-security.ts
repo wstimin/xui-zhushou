@@ -19,10 +19,7 @@ export function normalizeUsername(value: unknown) {
 
 export function validatePassword(value: unknown) {
   const password = String(value || "");
-  if (password.length < 12 || password.length > 128) throw new Error("管理员密码需为 12 至 128 位");
-  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^a-zA-Z0-9]/.test(password)) {
-    throw new Error("管理员密码必须包含大小写字母、数字和特殊字符");
-  }
+  if (password.length < 6 || password.length > 128) throw new Error("管理员密码需为 6 至 128 位");
   return password;
 }
 

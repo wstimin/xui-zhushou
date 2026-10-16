@@ -19,6 +19,8 @@ test("PM2 reads the release version instead of inheriting a previous updater ver
     const config = require("../ecosystem.config.cjs");
     const pkg = require("../package.json");
     assert.equal(config.apps[0].env.APP_VERSION, pkg.version);
+    assert.equal(config.apps[0].name, "panelark");
+    assert.equal(config.apps[0].env.PANELARK_DEPLOYMENT_MODE, "standalone");
   } finally {
     if (previous === undefined) delete process.env.APP_VERSION; else process.env.APP_VERSION = previous;
   }
@@ -90,10 +92,10 @@ install_assistant() { echo ACTION_INSTALL; }
 manage_service() { echo "ACTION_$1"; }
 view_logs() { echo ACTION_LOGS; }
 update_assistant() { echo ACTION_UPDATE; }
-view_setup_token() { echo ACTION_TOKEN; }
+initialize_from_menu() { echo ACTION_INIT; }
 show_menu`, { input: "1\n7\n8\n9\n10\n11\n12\n" });
   assert.equal(result.status, 0);
-  for (const action of ["INSTALL", "start", "stop", "restart", "LOGS", "UPDATE", "TOKEN"]) assert.match(result.output, new RegExp(`ACTION_${action}`));
+  for (const action of ["INSTALL", "start", "stop", "restart", "LOGS", "UPDATE", "INIT"]) assert.match(result.output, new RegExp(`ACTION_${action}`));
   const failed = shell(`service_status() { echo 未安装; }; manage_service() { false; echo SHOULD_NOT_CONTINUE; }; view_logs() { echo NEXT_ACTION; }; show_menu`, { input: "7\n10\n" });
   assert.equal(failed.status, 0); assert.match(failed.output, /操作未完成/); assert.match(failed.output, /NEXT_ACTION/); assert.doesNotMatch(failed.output, /SHOULD_NOT_CONTINUE/);
 });
@@ -142,16 +144,38 @@ install_assistant`);
 
 shellTest("service controls call only this PM2 application and verify starts", () => {
   const result = shell(`pm2() { echo "PM2:$*"; }
+migrate_legacy_process() { :; }
+acquire_management_lock() { :; }
 verify_running_release() { echo HEALTH_VERIFIED; }
 service_status() { echo 运行中; }
 manage_service start; manage_service stop; manage_service restart; view_logs`, { installed: true });
   assert.equal(result.status, 0); assert.match(result.output, /PM2:startOrReload ecosystem.config.cjs --update-env/);
-  assert.match(result.output, /PM2:stop 3xui-deploy-assistant/); assert.match(result.output, /PM2:logs 3xui-deploy-assistant --lines 100 --nostream/);
+  assert.match(result.output, /PM2:stop panelark/); assert.match(result.output, /PM2:logs panelark --lines 100 --nostream/);
   assert.equal((result.output.match(/HEALTH_VERIFIED/g) || []).length, 2);
   assert.doesNotMatch(result.output, /PM2:(?:stop|restart|delete) all/);
 });
 
 shellTest("service status reads the target process rather than an unrelated online process", () => {
-  const result = shell(`pm2() { echo '[{"name":"other","pm2_env":{"status":"online"}},{"name":"3xui-deploy-assistant","pm2_env":{"status":"stopped"}}]'; }; service_status`, { installed: true });
+  const result = shell(`pm2() { echo '[{"name":"other","pm2_env":{"status":"online"}},{"name":"panelark","pm2_env":{"status":"stopped"}}]'; }; service_status`, { installed: true });
   assert.equal(result.status, 0); assert.match(result.output, /已停止/); assert.doesNotMatch(result.output, /运行中/);
+});
+
+shellTest("legacy process migration deletes only the old process owned by this installation", () => {
+  const result = shell(`pm2() {
+if [ "$1" = jlist ]; then node -e 'console.log(JSON.stringify([{name:"3xui-deploy-assistant",pm2_env:{pm_cwd:process.argv[1]}}]))' "$TARGET_DIR"; else echo "PM2:$*"; fi
+}; migrate_legacy_process`, { installed: true });
+  assert.equal(result.status, 0); assert.match(result.output, /PM2:delete 3xui-deploy-assistant/);
+  const unrelated = shell(`pm2() { if [ "$1" = jlist ]; then echo '[{"name":"3xui-deploy-assistant","pm2_env":{"pm_cwd":"/some/other/app"}}]'; else echo UNEXPECTED_DELETE; fi; }; migrate_legacy_process`, { installed: true });
+  assert.equal(unrelated.status, 0); assert.doesNotMatch(unrelated.output, /UNEXPECTED_DELETE/);
+});
+
+shellTest("complete information reads the saved admin path and account, never a plaintext password", () => {
+  const result = shell(`touch "$TARGET_DIR/dist/panel-admin.cjs"
+account_info() { echo '{"initialized":true,"username":"saved_owner","adminPath":"/saved-console","siteUrl":"https://saved.example.com","siteName":"Saved site"}'; }
+get_public_ip() { SERVER_IP=192.0.2.1; }
+curl() { echo '{"status":"ok"}'; }
+pm2() { if [ "$1" = jlist ]; then echo '[]'; else echo '6.0.0'; fi; }
+view_panel_info`, { installed: true });
+  assert.equal(result.status, 0);
+  for (const value of ["Saved site", "saved_owner", "https://saved.example.com/saved-console", "panelark.sqlite", "Node.js", "PM2", "pa password", "健康检查：通过", "进程名称：panelark"]) assert.ok(result.output.includes(value), value);
 });

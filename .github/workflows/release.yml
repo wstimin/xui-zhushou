@@ -49,6 +49,9 @@ jobs:
       - name: Prepare release package
         run: npm run package:release
 
+      - name: Verify terminal installation without a web wizard
+        run: node scripts/smoke-standalone.mjs
+
       - name: Embed trusted release public key
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
@@ -117,6 +120,7 @@ jobs:
         run: |
           test -s release/package/VERSION
           test -s release/package/dist/server.cjs
+          test -s release/package/dist/panel-admin.cjs
           test -s release/package/dist/index.html
           test -s release/package/install.sh
           test -s release/package/package-lock.json

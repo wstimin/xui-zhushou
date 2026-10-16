@@ -18,7 +18,7 @@ const requiredFiles = [
   ".dockerignore",
 ];
 
-if (!fs.existsSync(path.join(root, "dist", "server.cjs"))) {
+if (!fs.existsSync(path.join(root, "dist", "server.cjs")) || !fs.existsSync(path.join(root, "dist", "panel-admin.cjs"))) {
   throw new Error("dist/server.cjs is missing; run npm run build first");
 }
 

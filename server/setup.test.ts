@@ -16,6 +16,8 @@ test("web installation validates domain and reserves the installation entry", ()
 test("web installation checks the actual store, saves settings atomically and locks after initialization", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-web-install-"));
   const previousData = process.env.PANELARK_DATA_DIR, previousToken = process.env.PANELARK_SETUP_TOKEN;
+  const previousMode = process.env.PANELARK_DEPLOYMENT_MODE;
+  process.env.PANELARK_DEPLOYMENT_MODE = "panel";
   process.env.PANELARK_DATA_DIR = directory; process.env.PANELARK_SETUP_TOKEN = "Web-install-owner-token-2026";
   const app = express(); app.use(express.json());
   const services = await mountPanelArkApi(app);
@@ -45,6 +47,7 @@ test("web installation checks the actual store, saves settings atomically and lo
     await new Promise<void>(resolve => server.close(() => resolve())); services.db.close(); fs.rmSync(directory, { recursive: true, force: true });
     if (previousData === undefined) delete process.env.PANELARK_DATA_DIR; else process.env.PANELARK_DATA_DIR = previousData;
     if (previousToken === undefined) delete process.env.PANELARK_SETUP_TOKEN; else process.env.PANELARK_SETUP_TOKEN = previousToken;
+    if (previousMode === undefined) delete process.env.PANELARK_DEPLOYMENT_MODE; else process.env.PANELARK_DEPLOYMENT_MODE = previousMode;
   }
 });
 

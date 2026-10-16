@@ -12,7 +12,7 @@ import { backupFilePath, backupLimits, backupPreview, createBackupArchive, decry
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
 import { normalizeAdminPath, readAdminPath } from "./admin-path.js";
-import { applicationUpdatePolicy, installationRequired, installationSettings, installationStatus } from "./setup.js";
+import { applicationUpdatePolicy, installationRequired, installationSettings, installationStatus, webInstallationEnabled } from "./setup.js";
 import {
   generateCdkCode,
   generateTotpSecret,
@@ -204,7 +204,7 @@ export async function mountPanelArkApi(app: Express) {
   const dataDirectory = path.resolve(process.env.PANELARK_DATA_DIR || path.join(process.cwd(), "data"));
   const db = await PanelArkDatabase.open(path.join(dataDirectory, "panelark.sqlite"));
   const pepper = loadOrCreatePepper(dataDirectory);
-  ensureSetupToken(db, dataDirectory);
+  if (webInstallationEnabled()) ensureSetupToken(db, dataDirectory);
   seedCatalog(db);
   const jobEngine = new PanelArkJobEngine(db);
   const updateManager = new PanelArkUpdateManager(db, dataDirectory, loadUpdatePublicKey(dataDirectory));
@@ -470,11 +470,12 @@ export async function mountPanelArkApi(app: Express) {
   });
 
   router.get("/admin/bootstrap", (_req, res) => {
-    const required = !db.get("SELECT id FROM admins LIMIT 1");
-    res.json({ success: true, required, setupTokenRequired: required });
+    const required = webInstallationEnabled() && installationRequired(db);
+    res.json({ success: true, required, setupTokenRequired: required, terminalInitializationRequired: !webInstallationEnabled() && installationRequired(db) });
   });
 
   router.post("/admin/bootstrap", loginLimiter, async (req, res) => {
+    if (!webInstallationEnabled()) return res.status(403).json({ success: false, error: "一键脚本部署请在 SSH 终端使用 pa init 初始化，网页安装已禁用" });
     try {
       if (db.get("SELECT id FROM admins LIMIT 1")) throw new Error("管理员已经初始化");
       const expected = db.get<DbRow>("SELECT value FROM site_settings WHERE key = 'admin_setup_token_hash'");

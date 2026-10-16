@@ -9,12 +9,13 @@ const packagedVersion = fs.existsSync(versionFile)
 module.exports = {
   apps: [
     {
-      name: "3xui-deploy-assistant",
+      name: "panelark",
       script: "dist/server.cjs",
       cwd: __dirname,
       env: {
         NODE_ENV: "production",
         APP_VERSION: packagedVersion || "development",
+        PANELARK_DEPLOYMENT_MODE: "standalone",
       },
       autorestart: true,
       max_restarts: 10,

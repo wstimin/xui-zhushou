@@ -19,8 +19,11 @@ NC='\033[0m' # No Color
 
 RELEASE_URL="${RELEASE_URL:-https://github.com/wstimin/xui-zhushou/releases/latest/download/xui-zhushou-linux.tar.gz}"
 RELEASE_CHECKSUM_URL="${RELEASE_CHECKSUM_URL:-https://github.com/wstimin/xui-zhushou/releases/latest/download/SHA256SUMS}"
-TARGET_DIR="/opt/3xui-deploy-assistant"
-APP_NAME="3xui-deploy-assistant"
+TARGET_DIR="/opt/panelark"
+# Keep old installations in place: never move or recreate their business data.
+if [ ! -d "$TARGET_DIR" ] && [ -d /opt/3xui-deploy-assistant ]; then TARGET_DIR="/opt/3xui-deploy-assistant"; fi
+APP_NAME="panelark"
+LEGACY_APP_NAME="3xui-deploy-assistant"
 SSL_DIR="/etc/3xui-assistant/ssl"
 PANELARK_STATE_DIR="/var/lib/panelark"
 DEFAULT_PORT="1888"
@@ -30,6 +33,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTIVE_PROJECT_DIR="$TARGET_DIR"
 SHORTCUT_DIR="/usr/local/bin"
 INSTALL_LOCK_FILE="/var/lock/panelark-install.lock"
+ADMIN_PASSWORD_INPUT="${PANELARK_ADMIN_PASSWORD:-}"
+unset PANELARK_ADMIN_PASSWORD
 
 load_runtime_config() {
   local config_dir=""
@@ -45,6 +50,7 @@ load_runtime_config() {
     . "$config_dir/.env"
     set +a
   fi
+  if [ -n "${PANELARK_ADMIN_PASSWORD:-}" ]; then ADMIN_PASSWORD_INPUT="$PANELARK_ADMIN_PASSWORD"; unset PANELARK_ADMIN_PASSWORD; fi
   APP_PORT="${PORT:-$DEFAULT_PORT}"
 }
 
@@ -301,6 +307,115 @@ repair_shortcut() {
   pause_if_tty
 }
 
+acquire_management_lock() {
+  if [ "${PANELARK_LOCK_HELD:-false}" = true ]; then return 0; fi
+  if ! command -v flock >/dev/null 2>&1; then echo "[ERROR] 缺少 util-linux/flock。"; return 1; fi
+  exec 9>"$INSTALL_LOCK_FILE"
+  if ! flock -n 9; then echo "[ERROR] 另一安装/更新或账号维护任务正在执行。"; return 1; fi
+  PANELARK_LOCK_HELD=true
+}
+
+migrate_legacy_process() {
+  local owned
+  owned=$(pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const path=require("node:path");try{console.log(JSON.parse(s).some(p=>p.name===process.argv[1]&&path.resolve(p.pm2_env?.pm_cwd||"/")===path.resolve(process.argv[2]))?"yes":"no");}catch{process.exit(1);}});' "$LEGACY_APP_NAME" "$TARGET_DIR") || return 1
+  if [ "$owned" = yes ]; then
+    pm2 delete "$LEGACY_APP_NAME" || return 1
+    echo "[OK] 已移除本项目的旧进程名，新进程使用 panelark；其他项目不受影响。"
+  fi
+}
+
+account_info() {
+  (cd "$TARGET_DIR" && node dist/panel-admin.cjs info)
+}
+
+info_field() {
+  printf '%s' "$ACCOUNT_INFO" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>console.log(JSON.parse(s)[process.argv[1]]??""));' "$1"
+}
+
+account_payload() {
+  # Passwords travel via stdin, never process arguments or a plaintext file.
+  printf '%s\0' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" "$ADMIN_PATH" "$SITE_URL" | node -e 'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const [username,password,adminPath,siteUrl]=s.split("\0");console.log(JSON.stringify({username,password,adminPath,siteUrl,siteName:"PanelArk 面板方舟"}));});'
+}
+
+initialize_assistant() {
+  local initialized result
+  ACCOUNT_INFO=$(account_info) || return 1
+  initialized=$(info_field initialized) || return 1
+  if [ "$initialized" = true ]; then echo "[OK] 管理员已配置，保留账号和后台路径，不重复初始化。"; return 0; fi
+  ADMIN_USERNAME="${PANELARK_ADMIN_USERNAME:-admin}"
+  ADMIN_PASSWORD="${ADMIN_PASSWORD_INPUT:-}"
+  unset ADMIN_PASSWORD_INPUT
+  ADMIN_PATH="${PANELARK_ADMIN_PATH:-/admin}"
+  get_public_ip
+  local scheme=http
+  if [ -f "${SSL_CERT:-$SSL_DIR/cert.pem}" ] && [ -f "${SSL_KEY:-$SSL_DIR/key.pem}" ]; then scheme=https; fi
+  SITE_URL="${PANELARK_SITE_URL:-${scheme}://${SERVER_IP}:${APP_PORT}}"
+  if [ -t 0 ]; then
+    echo "一键脚本将在终端完成初始化，不需要网页安装向导。"
+    read -r -p "管理员用户名 [$ADMIN_USERNAME]: " result || return 1
+    ADMIN_USERNAME="${result:-$ADMIN_USERNAME}"
+    if [ -z "$ADMIN_PASSWORD" ]; then read -r -s -p "管理员密码（至少 6 位，留空随机生成）: " ADMIN_PASSWORD || return 1; echo; fi
+    read -r -p "后台路径 [$ADMIN_PATH]: " result || return 1
+    ADMIN_PATH="${result:-$ADMIN_PATH}"
+    read -r -p "站点完整地址 [$SITE_URL]: " result || return 1
+    SITE_URL="${result:-$SITE_URL}"
+  fi
+  if [ -z "$ADMIN_PASSWORD" ]; then ADMIN_PASSWORD=$(node -e 'console.log(require("node:crypto").randomBytes(12).toString("base64url"))') || return 1; fi
+  # SQL.js persists the whole database: stop any live writer before modifying it.
+  if pm2 describe "$APP_NAME" >/dev/null 2>&1; then pm2 stop "$APP_NAME" >/dev/null || return 1; fi
+  if ! result=$(account_payload | (cd "$TARGET_DIR" && node dist/panel-admin.cjs initialize)); then ADMIN_PASSWORD=""; return 1; fi
+  ACCOUNT_INFO=$(account_info) || return 1
+  ADMIN_USERNAME=$(info_field username) || return 1
+  ADMIN_PATH=$(info_field adminPath) || return 1
+  SITE_URL=$(info_field siteUrl) || return 1
+  INITIAL_ADMIN_CREATED=true
+  echo "[OK] 终端初始化完成。初始密码仅显示这一次，请妥善保存。"
+}
+
+initialize_from_menu() {
+  require_installation || return 1
+  acquire_management_lock
+  cd "$TARGET_DIR"; load_runtime_config
+  ACCOUNT_INFO=$(account_info)
+  if [ "$(info_field initialized)" = true ]; then echo "[OK] 已初始化，保留已有账号、密码与后台路径。"; pause_if_tty; return 0; fi
+  migrate_legacy_process
+  initialize_assistant
+  if [ "${INITIAL_ADMIN_CREATED:-false}" = true ]; then
+    manage_service start
+    echo "管理员账号：$ADMIN_USERNAME"
+    echo "管理员初始密码（仅此一次）：$ADMIN_PASSWORD"
+    ADMIN_PASSWORD=""; unset PANELARK_ADMIN_PASSWORD
+  fi
+  pause_if_tty
+}
+
+reset_admin_password() {
+  require_installation || return 1
+  if [ ! -t 0 ]; then echo "[ERROR] 重置密码必须在可信交互终端中操作。"; return 1; fi
+  acquire_management_lock
+  cd "$TARGET_DIR"; load_runtime_config
+  ACCOUNT_INFO=$(account_info)
+  ADMIN_USERNAME=$(info_field username)
+  local result confirmation reset_result=0
+  read -r -p "要重置的超级管理员 [$ADMIN_USERNAME]: " result || return 1
+  ADMIN_USERNAME="${result:-$ADMIN_USERNAME}"
+  read -r -s -p "新密码（至少 6 位）: " ADMIN_PASSWORD || return 1; echo
+  read -r -s -p "再次输入新密码: " confirmation || return 1; echo
+  if [ "$ADMIN_PASSWORD" != "$confirmation" ] || [ "${#ADMIN_PASSWORD}" -lt 6 ]; then ADMIN_PASSWORD=""; echo "[ERROR] 两次密码不一致或不足 6 位，未修改。"; return 1; fi
+  ADMIN_PATH=""; SITE_URL=""
+  migrate_legacy_process
+  pm2 stop "$APP_NAME" >/dev/null
+  if ! account_payload | node dist/panel-admin.cjs password; then reset_result=1; fi
+  ADMIN_PASSWORD=""; unset PANELARK_ADMIN_PASSWORD
+  pm2 startOrReload ecosystem.config.cjs --update-env
+  APP_VERSION=$(read_installed_version)
+  verify_running_release
+  pm2 save >/dev/null
+  if [ "$reset_result" -ne 0 ]; then echo "[ERROR] 密码未修改，服务已恢复。"; return 1; fi
+  echo "[OK] 密码已重置，该账号旧会话已注销；请使用新密码登录。"
+  pause_if_tty
+}
+
 require_installation() {
   if [ ! -f "$TARGET_DIR/dist/server.cjs" ] || [ ! -f "$TARGET_DIR/ecosystem.config.cjs" ]; then
     echo -e "${YELLOW}[INFO] 尚未安装，请先选择首次安装。${NC}"; return 1
@@ -313,12 +428,13 @@ require_installation() {
 manage_service() {
   local action="$1"
   require_installation || return 1
+  acquire_management_lock
   cd "$TARGET_DIR"
   load_runtime_config
   case "$action" in
-    start) pm2 startOrReload ecosystem.config.cjs --update-env ;;
+    start) migrate_legacy_process; pm2 startOrReload ecosystem.config.cjs --update-env ;;
     stop) pm2 stop "$APP_NAME" ;;
-    restart) pm2 startOrReload ecosystem.config.cjs --update-env ;;
+    restart) migrate_legacy_process; pm2 startOrReload ecosystem.config.cjs --update-env ;;
   esac
   pm2 save >/dev/null
   if [ "$action" != stop ]; then
@@ -332,21 +448,6 @@ manage_service() {
 view_logs() {
   require_installation || return 1
   pm2 logs "$APP_NAME" --lines 100 --nostream
-  pause_if_tty
-}
-
-view_setup_token() {
-  require_installation || return 1
-  load_runtime_config
-  local data_dir="${PANELARK_DATA_DIR:-$TARGET_DIR/data}"
-  [[ "$data_dir" = /* ]] || data_dir="$TARGET_DIR/$data_dir"
-  if [ -n "${PANELARK_SETUP_TOKEN:-}" ]; then
-    echo "安装令牌：$PANELARK_SETUP_TOKEN"
-  elif [ -f "$data_dir/admin-setup-token.txt" ]; then
-    echo "安装令牌（请勿分享）："; cat "$data_dir/admin-setup-token.txt"
-  else
-    echo "未找到首次安装令牌；若已经创建管理员，这是安装入口锁定后的正常状态。"
-  fi
   pause_if_tty
 }
 
@@ -455,6 +556,7 @@ install_assistant() {
   if ! command -v flock >/dev/null 2>&1; then echo "[ERROR] 缺少 util-linux/flock，无法安全锁定安装任务。"; return 1; fi
   exec 9>"$INSTALL_LOCK_FILE"
   if ! flock -n 9; then echo "[ERROR] 另一安装/更新任务正在执行，请勿重复运行。"; return 1; fi
+  PANELARK_LOCK_HELD=true
   if [ -f "$TARGET_DIR/dist/server.cjs" ]; then
     if [ "${INSTALL_MODE:-install}" != update ] || [ "$(read_installed_version)" = "${EXPECTED_RELEASE_VERSION:-}" ]; then
       echo "[OK] 当前版本已安装，跳过重复操作。"; return 0
@@ -568,6 +670,12 @@ install_assistant() {
   APP_VERSION=$(read_installed_version)
   export APP_VERSION
 
+  migrate_legacy_process
+  if ! initialize_assistant; then
+    echo "[ERROR] 终端初始化未完成，正在恢复之前版本。"
+    restore_previous_release; return 1
+  fi
+
   # 更新只替换应用构建包；.env、独立数据目录与 /etc 下的 SSL 证书保持不变。
   if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
     echo -e "${YELLOW}检测到 PanelArk 正在运行，正在重启服务...${NC}"
@@ -615,6 +723,12 @@ install_assistant() {
 
   echo -e "⚡ ${BOLD}快捷调出菜单命令:${NC} 输入 ${GREEN}${BOLD}pa${NC} 即可随时打开控制菜单（兼容 sy）"
   echo -e "📦 ${BOLD}当前部署版本:${NC} ${GREEN}v${APP_VERSION}${NC}"
+  if [ "${INITIAL_ADMIN_CREATED:-false}" = true ]; then
+    echo "管理员账号：$ADMIN_USERNAME"
+    echo "管理员初始密码（仅此一次）：$ADMIN_PASSWORD"
+    echo "管理后台：${SITE_URL}${ADMIN_PATH}"
+    ADMIN_PASSWORD=""; unset PANELARK_ADMIN_PASSWORD
+  fi
 
   if [ -f "$SSL_DIR/cert.pem" ] && [ -f "$SSL_DIR/key.pem" ]; then
     echo -e "🔒 访问协议: ${GREEN}HTTPS (已应用 SSL 安全加密防护)${NC}"
@@ -759,44 +873,56 @@ issue_ssl_cert() {
 
 view_panel_info() {
   load_runtime_config
+  if [ ! -f "$TARGET_DIR/dist/server.cjs" ]; then echo "尚未安装 PanelArk，请先选择首次安装。"; pause_if_tty; return 0; fi
   echo -e "${CYAN}============================================================${NC}"
-  echo -e "${BOLD}              📊 当前 PanelArk 与 SSL 运行状态              ${NC}"
+  echo "                 PanelArk 完整运行与访问信息"
   echo -e "${CYAN}============================================================${NC}"
-
   get_public_ip
-  echo -e "🌐 ${BOLD}服务器公网 IP:${NC} ${GREEN}${SERVER_IP}${NC}"
-  APP_VERSION=$(read_installed_version)
-  echo -e "📦 ${BOLD}当前构建包版本:${NC} ${GREEN}v${APP_VERSION}${NC}"
-
-  # 1. Read only this application's PM2 state, not the first unrelated process.
-  echo -e "\n${BOLD}1️⃣  PanelArk PM2 服务状态:${NC}"
-  if [ -f "$TARGET_DIR/dist/server.cjs" ]; then
-    PM2_STATUS=$(service_status)
-    echo -e "   - 进程名称: ${CYAN}${APP_NAME}${NC}"
-    echo -e "   - 运行状态: ${GREEN}${PM2_STATUS}${NC}"
-    echo -e "   - 监听端口: ${CYAN}${APP_PORT}${NC}"
-    echo -e "   - 快捷调出指令: ${GREEN}pa${NC}（兼容 sy）"
-  else
-    echo -e "   - 运行状态: ${RED}未启动或未安装${NC}"
+  local data_dir="${PANELARK_DATA_DIR:-$TARGET_DIR/data}" protocol=http origin admin_path username
+  [[ "$data_dir" = /* ]] || data_dir="$TARGET_DIR/$data_dir"
+  ACCOUNT_INFO='{"initialized":false,"siteName":"PanelArk","siteUrl":"","adminPath":"/admin","username":""}'
+  if [ -f "$TARGET_DIR/dist/panel-admin.cjs" ]; then ACCOUNT_INFO=$(account_info) || return 1; fi
+  origin=$(info_field siteUrl)
+  admin_path=$(info_field adminPath)
+  username=$(info_field username)
+  if [ -f "${SSL_CERT:-$SSL_DIR/cert.pem}" ] && [ -f "${SSL_KEY:-$SSL_DIR/key.pem}" ]; then protocol=https; fi
+  origin="${origin:-${protocol}://${SERVER_IP}:${APP_PORT}}"
+  echo "部署方式：一键脚本（终端初始化，不使用网页向导）"
+  echo "站点名称：$(info_field siteName)"
+  echo "当前版本：v$(read_installed_version)"
+  echo "进程名称：$APP_NAME"
+  echo "运行状态：$(service_status)"
+  echo "公网 IP：$SERVER_IP"
+  echo "监听地址：${HOST:-0.0.0.0}:$APP_PORT"
+  echo "后端协议：$protocol"
+  echo "用户首页：$origin/"
+  echo "后台路径：$admin_path"
+  echo "管理后台：$origin$admin_path"
+  echo "初始化完成：$(info_field initialized)"
+  echo "管理员账号：${username:-尚未配置启用的超级管理员，请使用 pa init}"
+  echo "管理员密码：仅保存哈希，无法反查；忘记密码请运行 pa password"
+  echo "程序目录：$TARGET_DIR"
+  echo "配置文件：$TARGET_DIR/.env"
+  echo "业务数据：$data_dir"
+  echo "数据库：$data_dir/panelark.sqlite（SQLite）"
+  echo "备份目录：$data_dir/backups"
+  echo "运行用户：$(id -un)"
+  echo "系统架构：$(uname -sm)"
+  echo "Node.js：$(node -v 2>/dev/null || echo 未安装)"
+  echo "PM2：$(pm2 --version 2>/dev/null | tail -n1 || echo 不可用)"
+  if command -v pm2 >/dev/null 2>&1; then
+    pm2 jlist 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{const p=JSON.parse(s).find(p=>p.name===process.argv[1]);if(!p)return;const e=p.pm2_env;console.log("PID："+p.pid+" | 重启次数："+e.restart_time+" | CPU："+(p.monit?.cpu??0)+"% | 内存："+Math.round((p.monit?.memory??0)/1048576)+" MB");console.log("进程启动时间："+(e.pm_uptime?new Date(e.pm_uptime).toISOString():"未启动"));console.log("标准日志："+e.pm_out_log_path);console.log("错误日志："+e.pm_err_log_path);}catch{console.log("进程详情暂不可用");}});' "$APP_NAME" || true
   fi
-
-  # 2. SSL 证书与访问协议信息
-  echo -e "\n${BOLD}2️⃣  SSL 安全证书与面板访问入口:${NC}"
-  if [ -f "$SSL_DIR/cert.pem" ] && [ -f "$SSL_DIR/key.pem" ]; then
-    DOMAIN_IN_CERT=$(openssl x509 -subject -noout -in "$SSL_DIR/cert.pem" 2>/dev/null | sed -n 's/.*CN = \([^,]*\).*/\1/p' || echo "未知")
-    EXPIRE_DATE=$(openssl x509 -enddate -noout -in "$SSL_DIR/cert.pem" 2>/dev/null | cut -d= -f2 || echo "未知")
-    
-    echo -e "   - 证书状态: ${GREEN}已配置生效 (HTTPS 访问模式)${NC}"
-    echo -e "   - 绑定域名: ${CYAN}${DOMAIN_IN_CERT}${NC}"
-    echo -e "   - 证书到期: ${CYAN}${EXPIRE_DATE}${NC}"
-    echo -e "   - 域名 HTTPS 链接: ${GREEN}https://${DOMAIN_IN_CERT}:${APP_PORT}${NC}"
-    echo -e "   - IP   HTTPS 链接: ${GREEN}https://${SERVER_IP}:${APP_PORT}${NC}"
-  else
-    echo -e "   - 证书状态: ${YELLOW}未配置 SSL 证书 (当前为 HTTP 访问模式)${NC}"
-    echo -e "   - IP   HTTP  链接: ${CYAN}http://${SERVER_IP}:${APP_PORT}${NC}"
-  fi
-
-  echo -e "\n${CYAN}============================================================${NC}"
+  local health
+  health=$(curl -skf --connect-timeout 2 --max-time 5 "${protocol}://127.0.0.1:${APP_PORT}/api/health" 2>/dev/null || true)
+  if printf '%s' "$health" | grep -Fq '"status":"ok"'; then echo "健康检查：通过"; else echo "健康检查：未通过（服务停止时属正常），请查看 pa logs"; fi
+  if [ "$protocol" = https ]; then
+    echo "SSL 证书：${SSL_CERT:-$SSL_DIR/cert.pem}"
+    echo "SSL 密钥：${SSL_KEY:-$SSL_DIR/key.pem}"
+    openssl x509 -in "${SSL_CERT:-$SSL_DIR/cert.pem}" -noout -subject -enddate 2>/dev/null || true
+  else echo "SSL：后端未启用直连证书；若有外部 HTTPS 反向代理，请以站点地址为准。"; fi
+  echo "快捷命令：pa（兼容 sy） | 更新：pa update | 日志：pa logs"
+  echo "============================================================"
   pause_if_tty
 }
 
@@ -965,12 +1091,13 @@ show_menu() {
     echo -e " ${BOLD}[9]${NC} 重启服务"
     echo -e " ${BOLD}[10]${NC} 查看最近 100 行运行日志"
     echo -e " ${BOLD}[11]${NC} 检查并更新版本（相同版本不重复安装）"
-    echo -e " ${BOLD}[12]${NC} 查看首次网页安装令牌（敏感信息）"
+    echo -e " ${BOLD}[12]${NC} 终端初始化管理员（已初始化则保留）"
     echo -e " ${BOLD}[13]${NC} 修复 pa / sy 快捷命令"
+    echo -e " ${BOLD}[14]${NC} 重置管理员密码"
     echo -e " ${BOLD}[0]${NC} 退出脚本"
     echo "============================================================"
     
-    if ! read -r -p "请输入菜单功能编号 [0-13]: " CHOICE; then echo; return 0; fi
+    if ! read -r -p "请输入菜单功能编号 [0-14]: " CHOICE; then echo; return 0; fi
     case "$CHOICE" in
       1) run_menu_action install_assistant ;;
       2) run_menu_action issue_ssl_cert ;;
@@ -983,10 +1110,11 @@ show_menu() {
       9) run_menu_action manage_service restart ;;
       10) run_menu_action view_logs ;;
       11) run_menu_action update_assistant ;;
-      12) run_menu_action view_setup_token ;;
+      12) run_menu_action initialize_from_menu ;;
       13) run_menu_action repair_shortcut ;;
+      14) run_menu_action reset_admin_password ;;
       0) echo -e "${GREEN}感谢使用！退出管理脚本。${NC}"; exit 0 ;;
-      *) echo -e "${RED}输入无效，请输入 0-13 之间的编号！${NC}"; sleep 1 ;;
+      *) echo -e "${RED}输入无效，请输入 0-14 之间的编号！${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -1008,7 +1136,8 @@ main() {
       ;;
     start|stop|restart) manage_service "$1" ;;
     logs|log) view_logs ;;
-    token) view_setup_token ;;
+    init) initialize_from_menu ;;
+    password) reset_admin_password ;;
     shortcut) repair_shortcut ;;
     cert|ssl)
       issue_ssl_cert
@@ -1023,7 +1152,7 @@ main() {
       uninstall_all
       ;;
     *)
-      echo "用法：pa [menu|install|update|start|stop|restart|status|logs|token|env|cert|uninstall|shortcut]"
+      echo "用法：pa [menu|install|update|start|stop|restart|status|logs|init|password|env|cert|uninstall|shortcut]"
       return 1
       ;;
   esac

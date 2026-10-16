@@ -13,7 +13,7 @@ import { findInboundRecord, isRetryablePanelConnectionError, parseApiTokenFromOu
 import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
 import { mountPanelArkApi } from "./server/panelark-api.js";
 import { isAdminPagePath, markAdminHtml, readAdminPath } from "./server/admin-path.js";
-import { installationRequired } from "./server/setup.js";
+import { installationRequired, webInstallationEnabled } from "./server/setup.js";
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -195,7 +195,8 @@ async function startServer() {
   const panelArk = await mountPanelArkApi(app);
 
   app.use((req, res, next) => {
-    if (req.method === "GET" && (req.path === "/" || isAdminPagePath(req.path, readAdminPath(panelArk.db))) && installationRequired(panelArk.db)) {
+    if (!webInstallationEnabled() && /^\/install\/?$/.test(req.path)) return res.status(404).send("一键脚本部署不使用网页安装向导，请在 SSH 终端运行 pa init。");
+    if (webInstallationEnabled() && req.method === "GET" && (req.path === "/" || isAdminPagePath(req.path, readAdminPath(panelArk.db))) && installationRequired(panelArk.db)) {
       return res.redirect(302, "/install");
     }
     next();
@@ -715,6 +716,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     const indexHtml = fs.readFileSync(path.join(distPath, "index.html"), "utf8");
+    app.get(["/server.cjs", "/panel-admin.cjs"], (_req, res) => res.sendStatus(404));
     app.use(express.static(distPath, { index: false }));
     app.get("*", (req, res) => {
       res.status(200).type("html").send(pageHtml(indexHtml, req.path));

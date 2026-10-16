@@ -1,7 +1,7 @@
 {
   "name": "xui-zhushou",
   "private": true,
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "PanelArk 面板方舟：面向多种 VPS 面板与工具的一键部署助手",
   "type": "module",
   "engines": {
@@ -9,13 +9,13 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/server.cjs && esbuild server/panelark-cli.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/panel-admin.cjs",
     "start": "node dist/server.cjs",
     "panel:start": "node panel.cjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "package:release": "node scripts/create-release-package.mjs",
     "lint": "tsc --noEmit",
-    "test": "tsx --test server/setup.test.ts server/admin-path.test.ts server/install-script.test.ts server/inbound-builder.test.ts server/panel-adapters.test.ts server/catalog-adapters.test.ts server/panelark-api.test.ts server/panelark-backup.test.ts server/panelark-update.test.ts server/panelark-jobs.test.ts server/panelark-remote.test.ts server/panelark-remote-api.test.ts server/ssh.test.ts server/validation.test.ts server/xray-template.test.ts server/xui-client.test.ts"
+    "test": "tsx --test server/panelark-provision.test.ts server/setup.test.ts server/admin-path.test.ts server/install-script.test.ts server/inbound-builder.test.ts server/panel-adapters.test.ts server/catalog-adapters.test.ts server/panelark-api.test.ts server/panelark-backup.test.ts server/panelark-update.test.ts server/panelark-jobs.test.ts server/panelark-remote.test.ts server/panelark-remote-api.test.ts server/ssh.test.ts server/validation.test.ts server/xray-template.test.ts server/xui-client.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

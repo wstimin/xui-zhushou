@@ -15,6 +15,8 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
   const dataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-stage2-"));
   const previousDataDirectory = process.env.PANELARK_DATA_DIR;
   const previousSetupToken = process.env.PANELARK_SETUP_TOKEN;
+  const previousMode = process.env.PANELARK_DEPLOYMENT_MODE;
+  process.env.PANELARK_DEPLOYMENT_MODE = "panel";
   process.env.PANELARK_DATA_DIR = dataDirectory;
   process.env.PANELARK_SETUP_TOKEN = "stage-two-setup-token";
 
@@ -158,5 +160,6 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     fs.rmSync(dataDirectory, { recursive: true, force: true });
     if (previousDataDirectory === undefined) delete process.env.PANELARK_DATA_DIR; else process.env.PANELARK_DATA_DIR = previousDataDirectory;
     if (previousSetupToken === undefined) delete process.env.PANELARK_SETUP_TOKEN; else process.env.PANELARK_SETUP_TOKEN = previousSetupToken;
+    if (previousMode === undefined) delete process.env.PANELARK_DEPLOYMENT_MODE; else process.env.PANELARK_DEPLOYMENT_MODE = previousMode;
   }
 });

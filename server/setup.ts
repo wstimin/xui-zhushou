@@ -8,6 +8,10 @@ export function installationRequired(db: PanelArkDatabase) {
   return !db.get("SELECT id FROM admins LIMIT 1");
 }
 
+export function webInstallationEnabled() {
+  return ["panel", "docker"].includes(process.env.PANELARK_DEPLOYMENT_MODE || "standalone");
+}
+
 export function installationSettings(input: unknown) {
   const value = input as Record<string, unknown>;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("安装信息无效");
@@ -22,6 +26,7 @@ export function installationSettings(input: unknown) {
 }
 
 export function installationStatus(db: PanelArkDatabase, dataDirectory: string) {
+  if (!webInstallationEnabled()) return { success: true, enabled: false, required: false, initializationRequired: installationRequired(db), checks: [], ready: false };
   if (!installationRequired(db)) return { success: true, required: false, checks: [], ready: false };
   const checks: Array<{ id: string; label: string; passed: boolean; detail: string }> = [];
   const major = Number(process.versions.node.split(".")[0]);

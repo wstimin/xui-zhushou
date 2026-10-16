@@ -82,6 +82,12 @@ async function waitForHealth(version, env) {
 }
 
 let swapped = false;
+function removeOwnedLegacyProcess() {
+  const processes = JSON.parse(run("pm2", ["jlist"], target));
+  if (processes.some(p => p.name === "3xui-deploy-assistant" && path.resolve(p.pm2_env?.pm_cwd || "/") === target)) {
+    run("pm2", ["delete", "3xui-deploy-assistant"], target);
+  }
+}
 try {
   const state = readState();
   const archive = path.resolve(String(state.archivePath || ""));
@@ -105,6 +111,7 @@ try {
   fs.renameSync(candidate, target);
   swapped = true;
   writeState({ phase: "restarting", progress: 86, message: "新版本已切换，正在重启并执行健康检查" });
+  removeOwnedLegacyProcess();
   run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target, { APP_VERSION: version });
   if (!await waitForHealth(version, env)) throw new Error("新版本未通过健康检查");
   run("pm2", ["save"], target);
@@ -114,6 +121,8 @@ try {
   const reason = error instanceof Error ? error.message : String(error);
   if (swapped) {
     try {
+      const processes = JSON.parse(run("pm2", ["jlist"], target));
+      if (processes.some(p => p.name === "panelark" && path.resolve(p.pm2_env?.pm_cwd || "/") === target)) run("pm2", ["delete", "panelark"], target);
       if (fs.existsSync(target) && safeTarget(target)) fs.rmSync(target, { recursive: true, force: true });
       fs.renameSync(rollback, target);
       const previousVersion = fs.readFileSync(path.join(target, "VERSION"), "utf8").trim();
