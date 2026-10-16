@@ -59,6 +59,7 @@ import {
   type ServerEnvironment,
 } from './api';
 import type { ActiveServer, CatalogItem, ServerDraft, Theme, View } from './types';
+import { PurchaseLink } from './PurchaseLink';
 
 export function Header({
   theme,
@@ -70,6 +71,8 @@ export function Header({
   onToggleMenu,
   onViewChange,
   onConnect,
+  purchaseEnabled,
+  purchaseButtonText,
 }: {
   theme: Theme;
   view: View;
@@ -80,6 +83,8 @@ export function Header({
   onToggleMenu: () => void;
   onViewChange: (view: View) => void;
   onConnect: () => void;
+  purchaseEnabled: boolean;
+  purchaseButtonText: string;
 }) {
   return (
     <header className="site-header">
@@ -98,6 +103,7 @@ export function Header({
         </nav>
 
         <div className="nav-actions">
+          <PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} className="header-purchase" />
           <button className={`access-pill ${deploymentUnlocked ? 'unlocked' : ''}`} onClick={onConnect}>
             {deploymentUnlocked ? <CheckCircle2 size={14} /> : <LockKeyhole size={14} />}
             <span>{deploymentUnlocked ? '部署已解锁' : '只读浏览'}</span>
@@ -126,7 +132,7 @@ export function HomePage({
   serverConnected,
   serverEnvironment,
   onStart,
-  onPurchase,
+  purchaseEnabled,
   onOpenDocs,
   onViewPanels,
   onConnect,
@@ -140,7 +146,7 @@ export function HomePage({
   serverConnected: boolean;
   serverEnvironment?: ServerEnvironment;
   onStart: () => void;
-  onPurchase: () => void;
+  purchaseEnabled: boolean;
   onOpenDocs: () => void;
   onViewPanels: () => void;
   onConnect: () => void;
@@ -158,7 +164,7 @@ export function HomePage({
             <button className="button button-primary" onClick={onStart}>
               {serverConnected ? '选择部署面板' : deploymentUnlocked ? '填写服务器信息' : '验证 CDK 并开始'} <ArrowRight size={17} />
             </button>
-            {!deploymentUnlocked && <button className="button button-secondary purchase-button" onClick={onPurchase}><KeyRound size={16} /> {purchaseButtonText}</button>}
+            <PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} />
             <button className="button button-secondary" onClick={onOpenDocs}><BookOpen size={16} /> 查看文档</button>
           </div>
           <div className="trust-row">
@@ -303,6 +309,8 @@ export function CatalogPage({
   serverEnvironment,
   onDeploy,
   onConnect,
+  purchaseEnabled,
+  purchaseButtonText,
 }: {
   items: CatalogItem[];
   title: string;
@@ -313,6 +321,8 @@ export function CatalogPage({
   serverEnvironment?: ServerEnvironment;
   onDeploy: (item: CatalogItem) => void;
   onConnect: () => void;
+  purchaseEnabled: boolean;
+  purchaseButtonText: string;
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('全部');
@@ -326,10 +336,13 @@ export function CatalogPage({
     <section className="section-shell page-section">
       <div className="page-hero">
         <div><span className="eyebrow plain">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>
+        <div className="catalog-access-actions">
+        <PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} />
         <div className={`connection-card ${serverConnected ? 'connected' : deploymentUnlocked ? 'unlocked' : ''}`}>
           <div className="connection-icon">{deploymentUnlocked ? <Server size={20} /> : <LockKeyhole size={20} />}</div>
           <div><small>{deploymentUnlocked ? '目标服务器' : '当前权限'}</small><strong>{serverEnvironment?.targetHost || (deploymentUnlocked ? '等待连接' : '只读浏览')}</strong></div>
           <button onClick={onConnect}>{serverConnected ? '重新检测' : deploymentUnlocked ? '连接服务器' : '验证 CDK'}</button>
+        </div>
         </div>
       </div>
 
@@ -432,7 +445,7 @@ export function Footer({ onNavigate }: { onNavigate: (view: View) => void }) {
   );
 }
 
-export function CdkGateModal({ onClose, onVerified, onPurchase, purchaseButtonText }: { onClose: () => void; onVerified: (grant: CdkGrant) => void; onPurchase: () => void; purchaseButtonText: string }) {
+export function CdkGateModal({ onClose, onVerified, purchaseEnabled, purchaseButtonText }: { onClose: () => void; onVerified: (grant: CdkGrant) => void; purchaseEnabled: boolean; purchaseButtonText: string }) {
   const [cdk, setCdk] = useState('');
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
@@ -463,7 +476,7 @@ export function CdkGateModal({ onClose, onVerified, onPurchase, purchaseButtonTe
           <p>验证前可以查看全部公开内容，但不能填写服务器凭据或部署参数。验证不会立即扣除次数，安装成功后才核销。</p>
           <label className={`field license-field ${error ? 'has-error' : ''}`}><span>CDK 授权码</span><input value={cdk} onChange={event => { setCdk(event.target.value); setError(''); }} placeholder="PAK-XXXX-XXXX-XXXX" autoFocus />{error && <small className="field-error">{error}</small>}</label>
           <div className="license-benefit"><CheckCircle2 size={17} /><span>验证成功后，下一步先填写和检测服务器，再选择兼容面板</span></div>
-          <div className="modal-actions license-actions"><button className="button button-primary" onClick={verify} disabled={checking}>{checking ? '正在验证…' : '验证 CDK'} {!checking && <ArrowRight size={16} />}</button><button className="button button-secondary" onClick={onPurchase}>{purchaseButtonText} <ExternalLink size={15} /></button></div>
+          <div className="modal-actions license-actions"><button className="button button-primary" onClick={verify} disabled={checking}>{checking ? '正在验证…' : '验证 CDK'} {!checking && <ArrowRight size={16} />}</button><PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} /></div>
         </div>
       </section>
     </div>

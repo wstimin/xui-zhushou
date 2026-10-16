@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { adapterMetadataToCatalog, panels, tools } from './panelark/catalog';
 import { defaultPublicConfig, getPublicConfig, listPanelAdapters, listRecommendedResources, openRecommendedResource, type CdkGrant, type PublicConfig, type RecommendedResource } from './panelark/api';
-import type { ActiveServer, CatalogItem, ServerDraft, Theme, View } from './panelark/types';
+import type { ActiveServer, CatalogItem, ServerDraft, View } from './panelark/types';
+import { useTheme } from './panelark/theme';
 import {
   AboutPage,
   CatalogPage,
@@ -15,18 +16,8 @@ import {
   ServerConnectModal,
 } from './panelark/ui';
 
-function resolveInitialTheme(): Theme {
-  try {
-    const saved = localStorage.getItem('panelark-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-  } catch {
-    // Theme still works when local storage is unavailable.
-  }
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
 export default function App() {
-  const [theme, setTheme] = useState<Theme>(resolveInitialTheme);
+  const [theme, toggleTheme] = useTheme();
   const [view, setView] = useState<View>('home');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [deploymentUnlocked, setDeploymentUnlocked] = useState(false);
@@ -46,15 +37,6 @@ export default function App() {
   useEffect(() => { document.title = publicConfig.siteName || 'PanelArk 面板方舟'; }, [publicConfig.siteName]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem('panelark-theme', theme);
-    } catch {
-      // Ignore persistence errors.
-    }
-  }, [theme]);
-
-  useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setMobileMenuOpen(false);
   }, [view]);
@@ -66,7 +48,22 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    getPublicConfig().then(setPublicConfig).catch(() => setToast('暂时无法读取站点配置，购买入口可能不可用'));
+    let active = true, sequence = 0;
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      const request = ++sequence;
+      getPublicConfig().then(config => { if (active && request === sequence) setPublicConfig(config); }).catch(() => undefined);
+    };
+    const storage = (event: StorageEvent) => { if (event.key === 'panelark-settings-changed') refresh(); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', storage);
+    document.addEventListener('visibilitychange', refresh);
+    const timer = window.setInterval(refresh, 30000);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('storage', storage); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
+
+  useEffect(() => {
     listPanelAdapters().then(response => {
       const dynamicItems = adapterMetadataToCatalog(response.items);
       if (dynamicItems.length) {
@@ -82,18 +79,6 @@ export default function App() {
       const { url } = await openRecommendedResource(id);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch { setToast('推荐资源暂时不可用'); }
-  };
-
-  const openPurchase = () => {
-    if (!publicConfig.purchaseEnabled) {
-      setToast('当前未开放在线购买，请联系客服');
-      return;
-    }
-    if (!publicConfig.purchaseUrl) {
-      setToast('管理员尚未配置购买链接');
-      return;
-    }
-    window.open(publicConfig.purchaseUrl, '_blank', 'noopener,noreferrer');
   };
 
   const requestConnection = () => {
@@ -148,7 +133,9 @@ export default function App() {
         mobileMenuOpen={mobileMenuOpen}
         deploymentUnlocked={deploymentUnlocked}
         serverConnected={serverConnected}
-        onToggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+        onToggleTheme={toggleTheme}
+        purchaseEnabled={publicConfig.purchaseEnabled}
+        purchaseButtonText={publicConfig.purchaseButtonText}
         onToggleMenu={() => setMobileMenuOpen(open => !open)}
         onViewChange={setView}
         onConnect={requestConnection}
@@ -164,7 +151,7 @@ export default function App() {
             serverConnected={serverConnected}
             serverEnvironment={activeServer?.environment}
             onStart={() => requestDeploy()}
-            onPurchase={openPurchase}
+            purchaseEnabled={publicConfig.purchaseEnabled}
             purchaseButtonText={publicConfig.purchaseButtonText}
             onOpenDocs={() => setView('docs')}
             onViewPanels={() => setView('deploy')}
@@ -176,6 +163,8 @@ export default function App() {
           <CatalogPage
             items={catalogPanels}
             title="面板部署中心"
+            purchaseEnabled={publicConfig.purchaseEnabled}
+            purchaseButtonText={publicConfig.purchaseButtonText}
             eyebrow="Panel catalog"
             description="可先浏览面板目录；正式部署必须依次完成 CDK 验证和服务器检测，之后再选择面板。"
             deploymentUnlocked={deploymentUnlocked}
@@ -189,6 +178,8 @@ export default function App() {
           <CatalogPage
             items={catalogTools}
             title="系统工具箱"
+            purchaseEnabled={publicConfig.purchaseEnabled}
+            purchaseButtonText={publicConfig.purchaseButtonText}
             eyebrow="System toolkit"
             description="安全地安装常用组件与优化项，不接管你的日常服务器运维。"
             deploymentUnlocked={deploymentUnlocked}
@@ -208,7 +199,7 @@ export default function App() {
         <CdkGateModal
           onClose={() => setCdkModalOpen(false)}
           onVerified={handleCdkVerified}
-          onPurchase={openPurchase}
+          purchaseEnabled={publicConfig.purchaseEnabled}
           purchaseButtonText={publicConfig.purchaseButtonText}
         />
       )}

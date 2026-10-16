@@ -36,6 +36,10 @@ let csrfToken = '';
 
 type ApiOptions = RequestInit & { csrf?: boolean };
 
+export class AdminApiError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); this.name = 'AdminApiError'; }
+}
+
 async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
@@ -43,8 +47,8 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
     if (csrfToken) headers.set('x-csrf-token', csrfToken);
   }
   const response = await fetch(`/api/admin${path}`, { ...options, headers, credentials: 'same-origin' });
-  const body = await response.json().catch(() => ({})) as T & { error?: string; csrfToken?: string };
-  if (!response.ok) throw new Error(body.error || `请求失败（${response.status}）`);
+  const body = await response.json().catch(() => ({})) as T & { error?: string; code?: string; csrfToken?: string };
+  if (!response.ok) throw new AdminApiError(body.error || `请求失败（${response.status}）`, body.code);
   if (body.csrfToken) csrfToken = body.csrfToken;
   return body;
 }

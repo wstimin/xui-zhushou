@@ -107,6 +107,18 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     }));
     assert.equal(safeSettings.purchaseUrl, "https://shop.example/cdk");
     assert.equal(safeSettings.adminPath, "/private-console");
+    const buy = () => fetch(`${base}/public/purchase`, { redirect: "manual" });
+    const firstPurchase = await buy(); assert.equal(firstPurchase.status, 302); assert.equal(firstPurchase.headers.get("location"), "https://shop.example/cdk"); assert.equal(firstPurchase.headers.get("cache-control"), "no-store");
+    const changedLink = { ...safeSettings, purchaseUrl: "https://new-shop.example/new-cdk" };
+    assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(changedLink) })).status, 200);
+    assert.equal((await buy()).headers.get("location"), changedLink.purchaseUrl);
+    const freshConfig = await fetch(`${base}/public/config`); assert.equal(freshConfig.headers.get("cache-control"), "no-store"); assert.equal((await json(freshConfig)).purchaseUrl, changedLink.purchaseUrl);
+    assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...changedLink, purchaseEnabled: false }) })).status, 200);
+    const closed = await buy(); assert.equal(closed.status, 404); assert.equal(closed.headers.get("location"), null);
+    assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...changedLink, purchaseUrl: "https://user:pass@shop.example/" }) })).status, 400);
+    assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...safeSettings, purchaseUrl: "" }) })).status, 200);
+    assert.equal((await buy()).status, 503);
+    await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(safeSettings) });
 
     const resource = await json(await fetch(`${base}/admin/resources`, {
       method: "POST", headers: adminHeaders,
@@ -135,6 +147,8 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     }));
     assert.equal(backupPreview.preview.product, "PanelArk");
 
+    const plainLogin = await fetch(`${base}/admin/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password: "Secure_Admin!2026" }) });
+    assert.equal(plainLogin.status, 200);
     const twoFactorSetup = await json(await fetch(`${base}/admin/2fa/setup`, {
       method: "POST", headers: adminHeaders, body: JSON.stringify({ currentPassword: "Secure_Admin!2026" }),
     }));
@@ -143,6 +157,13 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
       method: "POST", headers: adminHeaders, body: JSON.stringify({ code: totpCode(twoFactorSetup.secret) }),
     });
     assert.equal(twoFactorEnable.status, 200);
+    const login2fa = (password: string, code?: string) => fetch(`${base}/admin/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "owner", password, totpCode: code }) });
+    const missingCode = await login2fa("Secure_Admin!2026");
+    assert.equal(missingCode.status, 401); assert.equal((await json(missingCode)).code, "TOTP_REQUIRED"); assert.equal(missingCode.headers.get("set-cookie"), null);
+    const wrongPassword = await login2fa("not-the-password"); assert.equal(wrongPassword.status, 401); assert.equal((await json(wrongPassword)).code, undefined);
+    const validCode = totpCode(twoFactorSetup.secret), invalidCode = String((Number(validCode) + 1) % 1000000).padStart(6, "0");
+    const badCode = await login2fa("Secure_Admin!2026", invalidCode); assert.equal(badCode.status, 401); assert.equal((await json(badCode)).code, "TOTP_INVALID"); assert.equal(badCode.headers.get("set-cookie"), null);
+    assert.equal((await login2fa("Secure_Admin!2026", validCode)).status, 200);
 
     const accountUpdate = await fetch(`${base}/admin/account`, {
       method: "PUT", headers: adminHeaders,

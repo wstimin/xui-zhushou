@@ -180,7 +180,7 @@ export const defaultPublicConfig: PublicConfig = {
 };
 
 export async function getPublicConfig() {
-  return request<PublicConfig & { success: true }>('/api/public/config');
+  return request<PublicConfig & { success: true }>('/api/public/config', { cache: 'no-store' });
 }
 
 export async function validateCdk(code: string) {

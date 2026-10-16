@@ -5,12 +5,14 @@ import {
   Users, X,
 } from 'lucide-react';
 import {
-  adminApi, type AdminIdentity, type AdminRecord, type AdminRole, type AdminSettings,
+  adminApi, AdminApiError, type AdminIdentity, type AdminRecord, type AdminRole, type AdminSettings,
   type AuditRecord, type BackupRecord, type CatalogAdminRecord, type CdkRecord, type DashboardStats,
   type JobReviewRecord, type PackageRecord, type ResourceRecord, type SessionRecord,
   type UpdateState,
   type SecurityReport,
 } from './api';
+import { ThemeToggle, useTheme } from '../panelark/theme';
+import type { Theme } from '../panelark/types';
 
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
@@ -22,6 +24,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 function formatDate(value?: string) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '永久有效'; }
 
 export default function AdminApp() {
+  const [theme, toggleTheme] = useTheme();
   const [state, setState] = useState<'loading' | 'bootstrap' | 'login' | 'ready'>('loading');
   const [admin, setAdmin] = useState<AdminIdentity | null>(null);
   const [view, setView] = useState<AdminView>('overview');
@@ -29,7 +32,6 @@ export default function AdminApp() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = localStorage.getItem('panelark-theme') === 'light' ? 'light' : 'dark';
     adminApi.bootstrapState().then(async ({ required }) => {
       if (required) return setState('bootstrap');
       try {
@@ -47,8 +49,8 @@ export default function AdminApp() {
 
   const authenticated = (identity: AdminIdentity) => { setAdmin(identity); setState('ready'); setView('overview'); };
   if (state === 'loading') return <AdminLoading />;
-  if (state === 'bootstrap') return <AdminAccess mode="bootstrap" onAuthenticated={authenticated} notice={notice} setNotice={setNotice} />;
-  if (state === 'login') return <AdminAccess mode="login" onAuthenticated={authenticated} notice={notice} setNotice={setNotice} />;
+  if (state === 'bootstrap') return <AdminAccess mode="bootstrap" theme={theme} onToggleTheme={toggleTheme} onAuthenticated={authenticated} notice={notice} setNotice={setNotice} />;
+  if (state === 'login') return <AdminAccess mode="login" theme={theme} onToggleTheme={toggleTheme} onAuthenticated={authenticated} notice={notice} setNotice={setNotice} />;
   if (!admin) return null;
 
   const logout = async () => {
@@ -81,7 +83,8 @@ export default function AdminApp() {
     <main className="admin-main">
       <header className="admin-topbar">
         <button className="admin-menu-button" onClick={() => setMenuOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
-        <div><span>安全管理会话</span><strong>{admin.username}</strong><em>{roleNames[admin.role]}</em></div>
+        <div className="admin-session"><span>安全管理会话</span><strong>{admin.username}</strong><em>{roleNames[admin.role]}</em></div>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
       </header>
       <div className="admin-content">
         {view === 'overview' && <OverviewPage notify={setNotice} />}
@@ -105,32 +108,38 @@ function AdminLoading() {
   return <div className="admin-loading"><div className="brand-mark"><Layers3 size={21} /></div><LoaderCircle className="spin" size={22} /><span>正在建立安全管理会话…</span></div>;
 }
 
-function AdminAccess({ mode, onAuthenticated, notice, setNotice }: { mode: 'bootstrap' | 'login'; onAuthenticated: (admin: AdminIdentity) => void; notice: Notice; setNotice: (notice: Notice) => void }) {
+export function AdminAccess({ mode, theme, onToggleTheme, onAuthenticated, notice, setNotice }: { mode: 'bootstrap' | 'login'; theme: Theme; onToggleTheme: () => void; onAuthenticated: (admin: AdminIdentity) => void; notice: Notice; setNotice: (notice: Notice) => void }) {
   const [setupToken, setSetupToken] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
+  const [requiresTotp, setRequiresTotp] = useState(false);
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setNotice(null);
     try {
-      const result = mode === 'bootstrap' ? await adminApi.bootstrap(setupToken, username, password) : await adminApi.login(username, password, totpCode);
+      const result = mode === 'bootstrap' ? await adminApi.bootstrap(setupToken, username, password) : await adminApi.login(username, password, requiresTotp ? totpCode : undefined);
       onAuthenticated(result.admin);
-    } catch (error) { setNotice({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
+    } catch (error) {
+      if (error instanceof AdminApiError && ['TOTP_REQUIRED', 'TOTP_INVALID'].includes(error.code || '')) setRequiresTotp(true);
+      if (error instanceof AdminApiError && error.code === 'TOTP_REQUIRED') { setNotice(null); return; }
+      setNotice({ kind: 'error', text: message(error) });
+    } finally { setBusy(false); }
   };
   return <div className="admin-access">
+    <div className="admin-access-theme"><ThemeToggle theme={theme} onToggle={onToggleTheme} /></div>
     <div className="admin-access-glow" />
     <form className="admin-access-card" onSubmit={submit}>
       <div className="admin-access-brand"><span className="brand-mark"><Layers3 size={20} /></span><strong>Panel<span>Ark</span></strong></div>
       <span className="admin-kicker">{mode === 'bootstrap' ? 'FIRST RUN SECURITY' : 'CONTROL CENTER'}</span>
       <h1>{mode === 'bootstrap' ? '初始化管理后台' : '欢迎回来'}</h1>
-      <p>{mode === 'bootstrap' ? '首次启动需要初始化令牌。此入口仅供宝塔 / 1Panel 部署初始化；一键脚本请在 SSH 终端运行 pa init。' : '登录后管理 CDK、购买入口、账号权限与操作审计。'}</p>
+      <p>{mode === 'bootstrap' ? '首次启动需要初始化令牌。此入口仅供宝塔 / 1Panel 部署初始化；一键脚本请在 SSH 终端运行 pa init。' : '登录后管理 CDK、购买入口与站点。未启用双重验证的账号，只需用户名和密码。'}</p>
       {mode === 'bootstrap' && <label className="admin-field"><span>初始化令牌</span><input type="password" value={setupToken} onChange={event => setSetupToken(event.target.value)} required autoComplete="off" placeholder="PAK-SETUP-…" /></label>}
-      <label className="admin-field"><span>管理员用户名</span><input value={username} onChange={event => setUsername(event.target.value)} required autoComplete="username" placeholder="panelark_admin" /></label>
-      <label className="admin-field"><span>{mode === 'bootstrap' ? '设置强密码' : '登录密码'}</span><input type="password" value={password} onChange={event => setPassword(event.target.value)} required autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'} placeholder={mode === 'bootstrap' ? '至少 6 位' : '输入管理密码'} /></label>
-      {mode === 'login' && <label className="admin-field"><span>2FA 动态验证码（启用后必填）</span><input inputMode="numeric" value={totpCode} onChange={event => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} autoComplete="one-time-code" placeholder="000000" /></label>}
+      <label className="admin-field"><span>管理员用户名</span><input value={username} onChange={event => { setUsername(event.target.value); setRequiresTotp(false); setTotpCode(''); }} required autoComplete="username" placeholder="panelark_admin" /></label>
+      <label className="admin-field"><span>{mode === 'bootstrap' ? '设置密码' : '登录密码'}</span><input type="password" value={password} onChange={event => { setPassword(event.target.value); setRequiresTotp(false); setTotpCode(''); }} required autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'} placeholder={mode === 'bootstrap' ? '至少 6 位' : '输入管理密码'} /></label>
+      {mode === 'login' && requiresTotp && <label className="admin-field admin-totp-field"><span>此账号已启用双重验证</span><input inputMode="numeric" value={totpCode} onChange={event => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} autoComplete="one-time-code" placeholder="输入验证器中的 6 位验证码" required pattern="[0-9]{6}" minLength={6} maxLength={6} autoFocus /><small>请输入验证器当前显示的动态码，不是登录密码。</small></label>}
       {notice && <div className={`admin-inline-notice ${notice.kind}`}>{notice.text}</div>}
-      <button className="admin-primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <ShieldCheck size={17} />}{busy ? '正在验证…' : mode === 'bootstrap' ? '创建超级管理员' : '安全登录'}</button>
+      <button className="admin-primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17} /> : <ShieldCheck size={17} />}{busy ? '正在验证…' : mode === 'bootstrap' ? '创建超级管理员' : requiresTotp ? '验证并登录' : '登录管理后台'}</button>
       <a href="/">返回 PanelArk 用户端</a>
     </form>
   </div>;
@@ -211,25 +220,35 @@ function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice
   const editable = admin.role !== 'support';
   const [form, setForm] = useState<AdminSettings>(emptySettings);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { adminApi.settings().then(({ success: _success, ...settings }) => setForm(settings)).catch(error => notify({ kind: 'error', text: message(error) })); }, [notify]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    adminApi.settings().then(({ success: _success, ...settings }) => { if (active) { setForm(settings); setLoading(false); } }).catch(error => { if (active) notify({ kind: 'error', text: message(error) }); });
+    return () => { active = false; };
+  }, [notify]);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true);
     try {
       const { success: _success, ...settings } = await adminApi.updateSettings(form);
       setForm(settings);
+      try { window.localStorage.setItem('panelark-settings-changed', String(Date.now())); } catch { /* focus refresh remains available */ }
       const currentPath = window.location.pathname.replace(/\/+$/g, '') || '/';
       if (currentPath !== settings.adminPath && !currentPath.startsWith(`${settings.adminPath}/`)) {
         window.location.assign(settings.adminPath);
         return;
       }
-      notify({ kind: 'success', text: '站点配置已保存，用户端刷新后生效' });
+      notify({ kind: 'success', text: '配置已保存，购买跳转立即生效，用户端自动同步' });
     }
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
-  return <><PageHeading kicker="Site configuration" title="站点配置" description="配置管理后台路径、用户端购买按钮、跳转链接、客服入口与公告。外链必须使用 HTTPS。" /><form className="admin-panel admin-settings-form" onSubmit={submit}>
-    <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>关闭后用户端隐藏购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
-    <div className="admin-form-grid"><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><AdminInput label="按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} /><AdminInput label="购买链接" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} /><AdminInput label="客服链接" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /><AdminInput label="全站公告" value={form.siteNotice} setValue={siteNotice => setForm({ ...form, siteNotice })} disabled={!editable} /></div>
-    {editable ? <button className="admin-primary" disabled={busy}>{busy ? '正在保存…' : '保存配置'}</button> : <p className="admin-readonly">当前角色只有查看权限。</p>}
+  return <><PageHeading kicker="Site configuration" title="站点配置" description="管理访问入口、CDK 购买渠道和站点公告。保存后购买跳转立即生效。" /><form className="admin-panel admin-settings-form" onSubmit={submit}>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>访问入口</legend><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><p className="admin-readonly">修改后会跳转到新后台地址，请保存此地址。</p></fieldset>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>CDK 购买与客服</legend>
+    <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>在导航、面板目录和授权弹窗中显示购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
+    <div className="admin-form-grid"><AdminInput label="购买按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} /><AdminInput label="购买链接（HTTPS）" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} /><AdminInput label="客服链接（HTTPS）" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /></div>
+    <div className="admin-settings-help"><p>先点击“保存配置”，再测试。购买入口每次跳转都读取服务器上最新保存的链接，不使用旧页面缓存。</p><a href="/api/public/purchase" target="_blank" rel="noopener noreferrer">测试已保存的购买链接 ↗</a></div></fieldset>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>站点公告</legend><AdminInput label="全站公告" value={form.siteNotice} setValue={siteNotice => setForm({ ...form, siteNotice })} disabled={!editable} /></fieldset>
+    {editable ? <button className="admin-primary" disabled={busy || loading}>{loading ? '正在读取配置…' : busy ? '正在保存…' : '保存配置'}</button> : <p className="admin-readonly">当前角色只有查看权限。</p>}
   </form></>;
 }
 

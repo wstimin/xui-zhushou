@@ -380,7 +380,20 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error, 409); }
   });
 
-  router.get("/public/config", (_req, res) => res.json({ success: true, ...getPublicSettings(db) }));
+  router.get("/public/config", (_req, res) => res.set("Cache-Control", "no-store").json({ success: true, ...getPublicSettings(db) }));
+
+  // Resolve at click time: never trust a URL cached by an already-open frontend.
+  router.get("/public/purchase", (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    const settings = getPublicSettings(db);
+    if (settings.purchaseEnabled && settings.purchaseUrl) {
+      try {
+        const url = new URL(settings.purchaseUrl);
+        if (url.protocol === "https:" && !url.username && !url.password) return res.redirect(302, url.href);
+      } catch { /* show a safe explanation below */ }
+    }
+    return res.status(settings.purchaseEnabled ? 503 : 404).type("html").send('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CDK 购买入口</title><body style="font:16px/1.8 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:24px"><h1>购买入口暂不可用</h1><p>站点尚未开放购买，或管理员还未保存有效购买链接。请联系站点管理员。</p><a href="/">返回站点首页</a></body></html>');
+  });
 
   router.post("/cdk/validate", cdkLimiter, (req, res) => {
     try {
@@ -514,9 +527,14 @@ export async function mountPanelArkApi(app: Express) {
         audit(db, req, "admin.login_failed", "admin", admin ? String(admin.id) : undefined, { username });
         throw new Error("用户名或密码错误");
       }
-      if (Number(admin.totp_enabled) === 1 && (!admin.totp_secret || !verifyTotp(req.body?.totpCode, String(admin.totp_secret)))) {
-        audit(db, req, "admin.login_2fa_failed", "admin", String(admin.id), {}, String(admin.id));
-        throw new Error("请输入有效的 2FA 动态验证码");
+      if (Number(admin.totp_enabled) === 1) {
+        if (!String(req.body?.totpCode || "").trim()) {
+          return res.status(401).json({ success: false, code: "TOTP_REQUIRED", error: "此账号已启用双重验证，请输入验证器中的 6 位动态验证码" });
+        }
+        if (!admin.totp_secret || !verifyTotp(req.body?.totpCode, String(admin.totp_secret))) {
+          audit(db, req, "admin.login_2fa_failed", "admin", String(admin.id), {}, String(admin.id));
+          return res.status(401).json({ success: false, code: "TOTP_INVALID", error: "动态验证码无效，请核对后重试" });
+        }
       }
       const session = createSession(db, req, String(admin.id));
       setSessionCookie(req, res, session.token);
@@ -645,7 +663,7 @@ export async function mountPanelArkApi(app: Express) {
       }
       for (const url of [purchaseUrl, supportUrl].filter(Boolean)) {
         const parsed = new URL(url);
-        if (parsed.protocol !== "https:") throw new Error("购买和客服链接必须使用 HTTPS");
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("购买和客服链接必须使用不含账号密码的 HTTPS 地址");
       }
       const updates: Record<string, string> = {
         purchase_enabled: bool(req.body?.purchaseEnabled) ? "true" : "false",
