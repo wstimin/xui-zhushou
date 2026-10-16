@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { pagedSql, pagination } from "./pagination.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import express, { Express, NextFunction, Request, Response } from "express";
@@ -568,8 +569,8 @@ export async function mountPanelArkApi(app: Express) {
     res.json({ success: true, stats: { totalCdks: Number(totalCdks?.total || 0), activeCdks: Number(activeCdks?.total || 0), consumed: Number(consumed?.total || 0), locked: Number(locked?.total || 0), jobsPendingReview: Number(jobsPendingReview?.total || 0), resourceClicks: Number(resourceClicks?.total || 0) } });
   });
 
-  router.get("/admin/packages", requirePermission("cdk:read"), (_req, res) => {
-    res.json({ success: true, items: db.all("SELECT * FROM cdk_packages ORDER BY created_at DESC") });
+  router.get("/admin/packages", requirePermission("cdk:read"), (req, res) => {
+    res.json({ success: true, ...pagedSql(db, req, "SELECT * FROM cdk_packages ORDER BY created_at DESC, id", "SELECT COUNT(*) AS total FROM cdk_packages") });
   });
 
   router.post("/admin/packages", requirePermission("cdk:write"), (req: AuthenticatedRequest, res) => {
@@ -626,16 +627,17 @@ export async function mountPanelArkApi(app: Express) {
 
   router.get("/admin/cdks", requirePermission("cdk:read"), (req, res) => {
     const status = text(req.query.status, 20);
-    const params: unknown[] = [];
+    const params: string[] = [];
     let where = "";
     if (["active", "disabled", "refunded"].includes(status)) { where = "WHERE c.status = ?"; params.push(status); }
-    const items = db.all(
+    const result = pagedSql(db, req,
       `SELECT c.id, c.code_hint, c.used_count, c.status, c.expires_at, c.created_at, p.name AS package_name, p.max_uses,
               (SELECT COUNT(*) FROM cdk_grants g WHERE g.cdk_id = c.id AND g.status = 'locked' AND g.expires_at > ?) AS locked_count
-       FROM cdks c JOIN cdk_packages p ON p.id = c.package_id ${where} ORDER BY c.created_at DESC LIMIT 500`,
-      [now(), ...params] as never,
+       FROM cdks c JOIN cdk_packages p ON p.id = c.package_id ${where} ORDER BY c.created_at DESC, c.id`,
+      `SELECT COUNT(*) AS total FROM cdks c JOIN cdk_packages p ON p.id = c.package_id ${where}`,
+      params, [now(), ...params],
     );
-    res.json({ success: true, items });
+    res.json({ success: true, ...result });
   });
 
   router.patch("/admin/cdks/:id", requirePermission("cdk:write"), (req: AuthenticatedRequest, res) => {
@@ -681,8 +683,8 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/admins", requirePermission("*"), (_req, res) => {
-    res.json({ success: true, items: db.all("SELECT id, username, role, enabled, created_at, updated_at FROM admins ORDER BY created_at") });
+  router.get("/admin/admins", requirePermission("*"), (req, res) => {
+    res.json({ success: true, ...pagedSql(db, req, "SELECT id, username, role, enabled, created_at, updated_at FROM admins ORDER BY created_at, id", "SELECT COUNT(*) AS total FROM admins") });
   });
 
   router.post("/admin/admins", requirePermission("*"), async (req: AuthenticatedRequest, res) => {
@@ -718,8 +720,9 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/catalog", requirePermission("settings:read"), (_req, res) => {
-    res.json({ success: true, items: catalogItems(db) });
+  router.get("/admin/catalog", requirePermission("settings:read"), (req, res) => {
+    const all = catalogItems(db), meta = pagination(req.query, all.length);
+    res.json({ success: true, items: all.slice((meta.page - 1) * meta.pageSize, meta.page * meta.pageSize), pagination: meta });
   });
 
   router.put("/admin/catalog/:id", requirePermission("catalog:write"), (req: AuthenticatedRequest, res) => {
@@ -742,8 +745,8 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error, 404); }
   });
 
-  router.get("/admin/resources", requirePermission("settings:read"), (_req, res) => {
-    res.json({ success: true, items: db.all("SELECT * FROM recommended_resources ORDER BY sort_order, created_at") });
+  router.get("/admin/resources", requirePermission("settings:read"), (req, res) => {
+    res.json({ success: true, ...pagedSql(db, req, "SELECT * FROM recommended_resources ORDER BY sort_order, created_at, id", "SELECT COUNT(*) AS total FROM recommended_resources") });
   });
 
   router.post("/admin/resources", requirePermission("resources:write"), (req: AuthenticatedRequest, res) => {
@@ -788,13 +791,14 @@ export async function mountPanelArkApi(app: Express) {
     res.json({ success: true });
   });
 
-  router.get("/admin/jobs", requirePermission("jobs:read"), (_req, res) => {
-    const items = db.all(
+  router.get("/admin/jobs", requirePermission("jobs:read"), (req, res) => {
+    const result = pagedSql(db, req,
       `SELECT j.id, j.kind, j.status, j.recovery_status, j.progress, j.error_message, j.task_key, j.created_at, j.updated_at,
               r.status AS review_status, r.refund_status, r.note
-       FROM deployment_jobs j LEFT JOIN job_reviews r ON r.job_id = j.id ORDER BY j.created_at DESC LIMIT 300`,
+       FROM deployment_jobs j LEFT JOIN job_reviews r ON r.job_id = j.id ORDER BY j.created_at DESC, j.id`,
+      "SELECT COUNT(*) AS total FROM deployment_jobs",
     );
-    res.json({ success: true, items });
+    res.json({ success: true, ...result });
   });
 
   router.put("/admin/jobs/:id/review", requirePermission("jobs:review"), (req: AuthenticatedRequest, res) => {
@@ -839,8 +843,8 @@ export async function mountPanelArkApi(app: Express) {
   });
 
   router.get("/admin/sessions", (req: AuthenticatedRequest, res) => {
-    const items = db.all("SELECT id, ip, user_agent, created_at, last_seen_at, expires_at FROM admin_sessions WHERE admin_id = ? ORDER BY last_seen_at DESC", [req.panelarkAdmin!.id]);
-    res.json({ success: true, currentSessionId: req.panelarkAdmin!.sessionId, items });
+    const result = pagedSql(db, req, "SELECT id, ip, user_agent, created_at, last_seen_at, expires_at FROM admin_sessions WHERE admin_id = ? ORDER BY last_seen_at DESC, id", "SELECT COUNT(*) AS total FROM admin_sessions WHERE admin_id = ?", [req.panelarkAdmin!.id]);
+    res.json({ success: true, currentSessionId: req.panelarkAdmin!.sessionId, ...result });
   });
 
   router.delete("/admin/sessions/:id", (req: AuthenticatedRequest, res) => {
@@ -885,8 +889,8 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/backups", requirePermission("*"), (_req, res) => {
-    res.json({ success: true, items: db.all("SELECT * FROM backup_records ORDER BY created_at DESC LIMIT 100") });
+  router.get("/admin/backups", requirePermission("*"), (req, res) => {
+    res.json({ success: true, ...pagedSql(db, req, "SELECT * FROM backup_records ORDER BY created_at DESC, id", "SELECT COUNT(*) AS total FROM backup_records") });
   });
 
   router.get("/admin/update/status", requirePermission("*"), (_req, res) => {
@@ -1028,8 +1032,8 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/audit", requirePermission("audit:read"), (_req, res) => {
-    res.json({ success: true, items: db.all("SELECT l.*, a.username FROM audit_logs l LEFT JOIN admins a ON a.id = l.admin_id ORDER BY l.id DESC LIMIT 300") });
+  router.get("/admin/audit", requirePermission("audit:read"), (req, res) => {
+    res.json({ success: true, ...pagedSql(db, req, "SELECT l.*, a.username FROM audit_logs l LEFT JOIN admins a ON a.id = l.admin_id ORDER BY l.id DESC", "SELECT COUNT(*) AS total FROM audit_logs") });
   });
 
   const scheduledBackupTimer = setInterval(() => {

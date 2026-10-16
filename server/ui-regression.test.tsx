@@ -3,13 +3,29 @@ import fs from 'node:fs';
 import test from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AdminAccess } from '../src/admin/AdminApp.js';
-import { AdminApiError, adminApi } from '../src/admin/api.js';
+import { AdminApiError, adminApi, allPackageOptions } from '../src/admin/api.js';
 import { PurchaseLink } from '../src/panelark/PurchaseLink.js';
 import { CatalogPage, CdkGateModal, Header, HomePage } from '../src/panelark/ui.js';
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
 
 const noop = () => {};
+test('batch package choices include every page, not only the first 100 packages', async () => {
+  const original = globalThis.fetch;
+  const pages: number[] = [];
+  try {
+    globalThis.fetch = async url => {
+      const query = new URL(String(url), 'http://localhost').searchParams;
+      const page = Number(query.get('page')); pages.push(page);
+      assert.equal(query.get('pageSize'), '100');
+      const start = (page - 1) * 100;
+      const items = Array.from({ length: Math.min(100, 203 - start) }, (_, index) => ({ id: `package-${start + index}` }));
+      return new Response(JSON.stringify({ success: true, items, pagination: { page, pageSize: 100, total: 203, totalPages: 3 } }));
+    };
+    const options = await allPackageOptions();
+    assert.equal(options.length, 203); assert.equal(options.at(-1)?.id, 'package-202'); assert.deepEqual(pages, [1,2,3]);
+  } finally { globalThis.fetch = original; }
+});
 test('login does not display or require a 2FA input before the server requests it', () => {
   const html = renderToStaticMarkup(<AdminAccess mode="login" theme="dark" onToggleTheme={noop} notice={null} setNotice={noop} onAuthenticated={noop} />);
   assert.doesNotMatch(html, /one-time-code|pattern="\[0-9\]/);
@@ -50,15 +66,23 @@ test('admin error codes preserve the server 2FA challenge; public configuration 
   } finally { globalThis.fetch = original; }
 });
 
-test('admin light and dark secondary text have readable contrast against their card surfaces', () => {
+test('admin and centered dialogs inherit the original warm ivory / warm black and gold design', () => {
   const css = fs.readFileSync(new URL('../src/admin/admin.css', import.meta.url), 'utf8');
+  const original = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /--(?:bg-primary|accent|text-primary):/);
+  assert.match(original, /--bg-primary:#1a1916/); assert.match(original, /--accent:#e0b83a/);
+  assert.match(css, /admin-dialog-backdrop\{position:fixed;inset:0;[^}]*place-items:center/);
+  assert.match(css, /background:var\(--bg-secondary\);color:var\(--text-primary\)/);
   const lum = (hex: string) => hex.slice(1).match(/../g)!.map(v => parseInt(v,16)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
-  for (const block of css.split('}').slice(0,2)) {
+  for (const block of original.split('}').slice(0,2)) {
     const value = (name: string) => block.match(new RegExp(`--${name}:(#[0-9a-f]{6});`))![1];
-    const background = lum(value('bg-elevated'));
-    for (const role of ['text-primary','text-secondary','text-tertiary']) {
-      const color = lum(value(role)), contrast = (Math.max(color,background)+.05)/(Math.min(color,background)+.05);
-      assert.ok(contrast >= 4.5, `${role}: ${contrast}`);
+    const background = lum(value('bg-secondary'));
+    for (const role of ['text-primary','text-secondary']) {
+      const color = lum(value(role));
+      assert.ok((Math.max(color,background)+.05)/(Math.min(color,background)+.05) >= 4.5);
     }
   }
+  const admin = fs.readFileSync(new URL('../src/admin/AdminApp.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(admin, /window\.(alert|confirm|prompt)\(/);
+  assert.equal((admin.match(/\{pager\}/g) || []).length, 8);
 });

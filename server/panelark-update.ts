@@ -112,6 +112,7 @@ export function validateAdapterCatalog(value: unknown) {
 function digest(bytes: Uint8Array) { return createHash("sha256").update(bytes).digest("hex"); }
 
 export class PanelArkUpdateManager {
+  private checking = false;
   private readonly statePath: string;
   private readonly updateDirectory: string;
 
@@ -147,10 +148,12 @@ export class PanelArkUpdateManager {
   }
 
   async check(channel: UpdateChannel) {
+    if (this.checking || ["downloading", "applying", "restarting"].includes(this.status().phase)) throw new Error("更新操作正在进行中，请稍后再检测");
     if (!this.publicKey.trim()) throw new Error("未配置更新签名公钥，在线更新已安全禁用");
     const version = currentVersion();
-    this.write({ phase: "checking", progress: 5, currentVersion: version, channel, message: `正在检查${channel === "stable" ? "稳定" : "测试"}通道` });
+    this.checking = true;
     try {
+      this.write({ phase: "checking", progress: 5, currentVersion: version, channel, message: `正在检查${channel === "stable" ? "稳定" : "测试"}通道` });
       const response = await fetch(this.manifestUrl(channel), { signal: AbortSignal.timeout(15_000), headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`更新清单请求失败（HTTP ${response.status}）`);
       const manifest = validateReleaseManifest(await response.json(), this.publicKey, channel);
@@ -160,6 +163,8 @@ export class PanelArkUpdateManager {
     } catch (error) {
       this.write({ phase: "failed", progress: 0, message: "更新检查失败", error: error instanceof Error ? error.message : String(error) });
       throw error;
+    } finally {
+      this.checking = false;
     }
   }
 

@@ -92,10 +92,11 @@ install_assistant() { echo ACTION_INSTALL; }
 manage_service() { echo "ACTION_$1"; }
 view_logs() { echo ACTION_LOGS; }
 update_assistant() { echo ACTION_UPDATE; }
+check_update() { echo ACTION_CHECK; }
 initialize_from_menu() { echo ACTION_INIT; }
-show_menu`, { input: "1\n7\n8\n9\n10\n11\n12\n" });
+show_menu`, { input: "1\n7\n8\n9\n10\n11\n15\n12\n" });
   assert.equal(result.status, 0);
-  for (const action of ["INSTALL", "start", "stop", "restart", "LOGS", "UPDATE", "INIT"]) assert.match(result.output, new RegExp(`ACTION_${action}`));
+  for (const action of ["INSTALL", "start", "stop", "restart", "LOGS", "CHECK", "UPDATE", "INIT"]) assert.match(result.output, new RegExp(`ACTION_${action}`));
   const failed = shell(`service_status() { echo 未安装; }; manage_service() { false; echo SHOULD_NOT_CONTINUE; }; view_logs() { echo NEXT_ACTION; }; show_menu`, { input: "7\n10\n" });
   assert.equal(failed.status, 0); assert.match(failed.output, /操作未完成/); assert.match(failed.output, /NEXT_ACTION/); assert.doesNotMatch(failed.output, /SHOULD_NOT_CONTINUE/);
 });
@@ -178,4 +179,8 @@ pm2() { if [ "$1" = jlist ]; then echo '[]'; else echo '6.0.0'; fi; }
 view_panel_info`, { installed: true });
   assert.equal(result.status, 0);
   for (const value of ["Saved site", "saved_owner", "https://saved.example.com/saved-console", "panelark.sqlite", "Node.js", "PM2", "pa password", "健康检查：通过", "进程名称：panelark"]) assert.ok(result.output.includes(value), value);
+});
+shellTest("version detection never installs even when a newer signed release exists", () => {
+  const result = shell(`${mockManifestDownload}\nmain check-update`, { installed: true, manifestVersion: "2.3.0" });
+  assert.equal(result.status, 0); assert.match(result.output, /发现新版本/); assert.doesNotMatch(result.output, /INSTALL:/);
 });

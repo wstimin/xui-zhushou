@@ -451,7 +451,8 @@ view_logs() {
   pause_if_tty
 }
 
-update_assistant() {
+check_update() {
+  UPDATE_AVAILABLE=false
   require_installation || return 1
   local manifest_file candidate current comparison
   manifest_file=$(mktemp)
@@ -476,11 +477,23 @@ NODE
   comparison=$(node -e 'const [a,b]=process.argv.slice(1).map(v=>v.split(".").map(Number)); if(a.length!==3||b.length!==3||[...a,...b].some(n=>!Number.isInteger(n)))process.exit(1); console.log(a.reduce((r,n,i)=>r||Math.sign(n-b[i]),0));' "$EXPECTED_RELEASE_VERSION" "$current") || { echo "[ERROR] 当前版本无法识别，未执行更新。"; return 1; }
   if [ "$comparison" -le 0 ]; then
     echo "[OK] 当前 v$current 已是最新或更高版本，不下载、不重复安装、不重启。"
-    pause_if_tty; return 0
+    return 0
   fi
-  echo "[INFO] 更新 v$current → v$EXPECTED_RELEASE_VERSION；保留配置、业务数据和证书。"
+  UPDATE_AVAILABLE=true
+  echo "[INFO] 发现新版本 v$current → v$EXPECTED_RELEASE_VERSION。检测不会下载、安装或重启；请手动选择更新。"
   RELEASE_URL=$(printf '%s\n' "$candidate" | tail -n1)
   RELEASE_CHECKSUM_URL="${RELEASE_URL%/*}/SHA256SUMS"
+}
+
+update_assistant() {
+  check_update || return 1
+  [ "$UPDATE_AVAILABLE" = true ] || return 0
+  if [ -t 0 ]; then
+    local answer
+    read -r -p "确认下载并更新到 v$EXPECTED_RELEASE_VERSION？[y/N]: " answer || return 0
+    case "$answer" in y|Y|yes|YES) ;; *) echo "[INFO] 已取消更新。"; return 0 ;; esac
+  fi
+  # A non-interactive 'pa update' is an explicit update command, never a version check.
   INSTALL_MODE=update install_assistant
 }
 
@@ -1090,14 +1103,15 @@ show_menu() {
     echo -e " ${BOLD}[8]${NC} 停止服务"
     echo -e " ${BOLD}[9]${NC} 重启服务"
     echo -e " ${BOLD}[10]${NC} 查看最近 100 行运行日志"
-    echo -e " ${BOLD}[11]${NC} 检查并更新版本（相同版本不重复安装）"
+    echo -e " ${BOLD}[11]${NC} 仅检测新版本（不下载、不安装）"
     echo -e " ${BOLD}[12]${NC} 终端初始化管理员（已初始化则保留）"
     echo -e " ${BOLD}[13]${NC} 修复 pa / sy 快捷命令"
     echo -e " ${BOLD}[14]${NC} 重置管理员密码"
+    echo -e " ${BOLD}[15]${NC} 手动更新版本（确认后执行）"
     echo -e " ${BOLD}[0]${NC} 退出脚本"
     echo "============================================================"
     
-    if ! read -r -p "请输入菜单功能编号 [0-14]: " CHOICE; then echo; return 0; fi
+    if ! read -r -p "请输入菜单功能编号 [0-15]: " CHOICE; then echo; return 0; fi
     case "$CHOICE" in
       1) run_menu_action install_assistant ;;
       2) run_menu_action issue_ssl_cert ;;
@@ -1109,12 +1123,13 @@ show_menu() {
       8) run_menu_action manage_service stop ;;
       9) run_menu_action manage_service restart ;;
       10) run_menu_action view_logs ;;
-      11) run_menu_action update_assistant ;;
+      11) run_menu_action check_update ;;
       12) run_menu_action initialize_from_menu ;;
       13) run_menu_action repair_shortcut ;;
       14) run_menu_action reset_admin_password ;;
+      15) run_menu_action update_assistant ;;
       0) echo -e "${GREEN}感谢使用！退出管理脚本。${NC}"; exit 0 ;;
-      *) echo -e "${RED}输入无效，请输入 0-14 之间的编号！${NC}"; sleep 1 ;;
+      *) echo -e "${RED}输入无效，请输入 0-15 之间的编号！${NC}"; sleep 1 ;;
     esac
   done
 }
@@ -1131,6 +1146,7 @@ main() {
     install|deploy)
       install_assistant
       ;;
+    check-update) check_update ;;
     update|upgrade)
       update_assistant
       ;;
@@ -1152,7 +1168,7 @@ main() {
       uninstall_all
       ;;
     *)
-      echo "用法：pa [menu|install|update|start|stop|restart|status|logs|init|password|env|cert|uninstall|shortcut]"
+      echo "用法：pa [menu|install|check-update|update|start|stop|restart|status|logs|init|password|env|cert|uninstall|shortcut]"
       return 1
       ;;
   esac

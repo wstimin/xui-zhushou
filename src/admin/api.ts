@@ -32,6 +32,11 @@ export interface UpdateState {
 }
 export interface SecurityReport { generatedAt: string; production: boolean; summary: 'pass' | 'warning' | 'fail'; failed: number; warnings: number; checks: Array<{ id: string; label: string; status: 'pass' | 'warning' | 'fail'; detail: string }> }
 
+export interface Pagination { page: number; pageSize: number; total: number; totalPages: number }
+export interface PageQuery { page?: number; pageSize?: number }
+export interface PageResult<T> { success: true; items: T[]; pagination: Pagination }
+const pagePath = (path: string, query: PageQuery = {}) => `${path}?${new URLSearchParams({ page: String(query.page || 1), pageSize: String(query.pageSize || 20) })}`;
+
 let csrfToken = '';
 
 type ApiOptions = RequestInit & { csrf?: boolean };
@@ -53,6 +58,14 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   return body;
 }
 
+export async function allPackageOptions() {
+  const items: PackageRecord[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await adminApi.packages({ page, pageSize: 100 }); items.push(...result.items);
+    if (page >= result.pagination.totalPages) return items;
+  }
+}
+
 export const adminApi = {
   bootstrapState: () => api<{ success: true; required: boolean; setupTokenRequired: boolean }>('/bootstrap', { csrf: false }),
   bootstrap: (setupToken: string, username: string, password: string) => api<{ success: true; admin: AdminIdentity; csrfToken: string }>('/bootstrap', { method: 'POST', body: JSON.stringify({ setupToken, username, password }), csrf: false }),
@@ -60,34 +73,34 @@ export const adminApi = {
   session: () => api<{ success: true; admin: AdminIdentity; csrfToken: string }>('/session'),
   logout: () => api<{ success: true }>('/logout', { method: 'POST' }),
   dashboard: () => api<{ success: true; stats: DashboardStats }>('/dashboard'),
-  packages: () => api<{ success: true; items: PackageRecord[] }>('/packages'),
+  packages: (query: PageQuery = {}) => api<PageResult<PackageRecord>>(pagePath('/packages', query)),
   createPackage: (payload: Record<string, unknown>) => api<{ success: true; id: string }>('/packages', { method: 'POST', body: JSON.stringify(payload) }),
   updatePackage: (id: string, enabled: boolean) => api<{ success: true }>(`/packages/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
   createBatch: (payload: { packageId: string; name: string; quantity: number }) => api<{ success: true; batchId: string; codes: string[]; warning: string }>('/batches', { method: 'POST', body: JSON.stringify(payload) }),
-  cdks: () => api<{ success: true; items: CdkRecord[] }>('/cdks'),
+  cdks: (query: PageQuery = {}) => api<PageResult<CdkRecord>>(pagePath('/cdks', query)),
   updateCdk: (id: string, status: CdkRecord['status']) => api<{ success: true }>(`/cdks/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   settings: () => api<{ success: true } & AdminSettings>('/settings'),
   updateSettings: (payload: AdminSettings) => api<{ success: true } & AdminSettings>('/settings', { method: 'PUT', body: JSON.stringify(payload) }),
-  admins: () => api<{ success: true; items: AdminRecord[] }>('/admins'),
+  admins: (query: PageQuery = {}) => api<PageResult<AdminRecord>>(pagePath('/admins', query)),
   createAdmin: (payload: { username: string; password: string; role: AdminRole }) => api<{ success: true; id: string }>('/admins', { method: 'POST', body: JSON.stringify(payload) }),
   updateAdmin: (id: string, payload: { role: AdminRole; enabled: boolean }) => api<{ success: true }>(`/admins/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   updateAccount: (payload: { currentPassword: string; username?: string; newPassword?: string }) => api<{ success: true; admin: AdminIdentity }>('/account', { method: 'PUT', body: JSON.stringify(payload) }),
-  audit: () => api<{ success: true; items: AuditRecord[] }>('/audit'),
-  catalog: () => api<{ success: true; items: CatalogAdminRecord[] }>('/catalog'),
+  audit: (query: PageQuery = {}) => api<PageResult<AuditRecord>>(pagePath('/audit', query)),
+  catalog: (query: PageQuery = {}) => api<PageResult<CatalogAdminRecord>>(pagePath('/catalog', query)),
   updateCatalog: (id: string, payload: Partial<CatalogAdminRecord>) => api<{ success: true; item: CatalogAdminRecord }>(`/catalog/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-  resources: () => api<{ success: true; items: ResourceRecord[] }>('/resources'),
+  resources: (query: PageQuery = {}) => api<PageResult<ResourceRecord>>(pagePath('/resources', query)),
   createResource: (payload: Omit<ResourceRecord, 'id' | 'click_count'>) => api<{ success: true; id: string }>('/resources', { method: 'POST', body: JSON.stringify(payload) }),
   updateResource: (id: string, payload: Partial<ResourceRecord>) => api<{ success: true }>(`/resources/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteResource: (id: string) => api<{ success: true }>(`/resources/${id}`, { method: 'DELETE' }),
-  jobs: () => api<{ success: true; items: JobReviewRecord[] }>('/jobs'),
+  jobs: (query: PageQuery = {}) => api<PageResult<JobReviewRecord>>(pagePath('/jobs', query)),
   reviewJob: (id: string, payload: { status: string; note: string }) => api<{ success: true }>(`/jobs/${id}/review`, { method: 'PUT', body: JSON.stringify(payload) }),
   refundJob: (id: string, note: string) => api<{ success: true; alreadyRefunded: boolean }>(`/jobs/${id}/refund`, { method: 'POST', body: JSON.stringify({ note }) }),
-  sessions: () => api<{ success: true; currentSessionId: string; items: SessionRecord[] }>('/sessions'),
+  sessions: (query: PageQuery = {}) => api<PageResult<SessionRecord> & { currentSessionId: string }>(pagePath('/sessions', query)),
   revokeSession: (id: string) => api<{ success: true; currentRevoked: boolean }>(`/sessions/${id}`, { method: 'DELETE' }),
   setup2fa: (currentPassword: string) => api<{ success: true; secret: string; uri: string }>('/2fa/setup', { method: 'POST', body: JSON.stringify({ currentPassword }) }),
   enable2fa: (code: string) => api<{ success: true }>('/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) }),
   disable2fa: (currentPassword: string, code: string) => api<{ success: true }>('/2fa', { method: 'DELETE', body: JSON.stringify({ currentPassword, code }) }),
-  backups: () => api<{ success: true; items: BackupRecord[] }>('/backups'),
+  backups: (query: PageQuery = {}) => api<PageResult<BackupRecord>>(pagePath('/backups', query)),
   createBackup: (passphrase: string, reason = 'manual') => api<{ success: true; item: BackupRecord }>('/backups', { method: 'POST', body: JSON.stringify({ passphrase, reason }) }),
   previewBackup: (id: string, passphrase: string) => api<{ success: true; preview: Record<string, unknown> }>(`/backups/${id}/preview`, { method: 'POST', body: JSON.stringify({ passphrase }) }),
   restoreBackup: (id: string, passphrase: string) => api<{ success: true; message: string; preRestoreSnapshot: string }>(`/backups/${id}/restore`, { method: 'POST', body: JSON.stringify({ passphrase }) }),

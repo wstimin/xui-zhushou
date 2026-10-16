@@ -165,6 +165,37 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     const badCode = await login2fa("Secure_Admin!2026", invalidCode); assert.equal(badCode.status, 401); assert.equal((await json(badCode)).code, "TOTP_INVALID"); assert.equal(badCode.headers.get("set-cookie"), null);
     assert.equal((await login2fa("Secure_Admin!2026", validCode)).status, 200);
 
+    // Real API pagination: data beyond the former 100/300/500 caps remains accessible.
+    const extraBatch = await json(await fetch(`${base}/admin/batches`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ packageId: packageResponse.id, quantity: 500 }) }));
+    assert.equal(extraBatch.codes.length, 500);
+    const extraBatch2 = await json(await fetch(`${base}/admin/batches`, { method: "POST", headers: adminHeaders, body: JSON.stringify({ packageId: packageResponse.id, quantity: 101 }) }));
+    assert.equal(extraBatch2.codes.length, 101);
+    const seen = new Set<string>();
+    let cdkTotal = 0;
+    for (let page = 1; ; page++) {
+      const response = await json(await fetch(`${base}/admin/cdks?page=${page}&pageSize=100`, { headers: adminHeaders }));
+      assert.equal(response.pagination.page, page);
+      cdkTotal = response.pagination.total;
+      for (const item of response.items) { assert.ok(!seen.has(item.id)); seen.add(item.id); assert.equal(typeof item.locked_count, "number"); }
+      if (page === response.pagination.totalPages) break;
+    }
+    assert.ok(cdkTotal > 500); assert.equal(seen.size, cdkTotal);
+    const filtered = await json(await fetch(`${base}/admin/cdks?status=active&pageSize=1`, { headers: adminHeaders }));
+    assert.equal(filtered.items.length, 1); assert.equal(filtered.items[0].status, "active");
+    assert.equal(filtered.pagination.total, services.db.get<{ total: number }>("SELECT COUNT(*) AS total FROM cdks WHERE status = 'active'")?.total);
+    for (const endpoint of ["packages", "admins", "catalog", "resources", "jobs", "sessions", "backups", "audit"]) {
+      const response = await json(await fetch(`${base}/admin/${endpoint}?pageSize=1&page=999999`, { headers: adminHeaders }));
+      assert.equal(response.success, true, endpoint);
+      assert.ok(response.items.length <= 1, endpoint);
+      assert.equal(response.pagination.pageSize, 1);
+      assert.equal(response.pagination.page, response.pagination.totalPages);
+      assert.equal(response.pagination.totalPages, Math.max(1, response.pagination.total));
+    }
+    const badPaging = await json(await fetch(`${base}/admin/cdks?page=-10&pageSize=999999`, { headers: adminHeaders }));
+    assert.equal(badPaging.pagination.page, 1); assert.equal(badPaging.pagination.pageSize, 100);
+    const invalidPaging = await json(await fetch(`${base}/admin/cdks?page[bad]=1&pageSize=abc`, { headers: adminHeaders }));
+    assert.equal(invalidPaging.pagination.page, 1); assert.equal(invalidPaging.pagination.pageSize, 20);
+
     const accountUpdate = await fetch(`${base}/admin/account`, {
       method: "PUT", headers: adminHeaders,
       body: JSON.stringify({ currentPassword: "Secure_Admin!2026", username: "panelark_owner", newPassword: "New_Secure!2026" }),
