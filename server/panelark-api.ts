@@ -906,7 +906,7 @@ export async function mountPanelArkApi(app: Express) {
   router.post("/admin/update/check", requirePermission("*"), async (req: AuthenticatedRequest, res) => {
     try {
       const channel = text(req.body?.channel, 20) as UpdateChannel;
-      if (!["stable", "beta"].includes(channel)) throw new Error("更新通道无效");
+      if (channel !== "stable") throw new Error("正式版仅支持稳定更新通道");
       const state = await updateManager.check(channel);
       audit(db, req, "update.check", "system", undefined, { channel, targetVersion: state.targetVersion }, req.panelarkAdmin!.id);
       res.json({ success: true, state });

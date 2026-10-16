@@ -6,7 +6,7 @@ import { saveManagedBackup } from "./panelark-backup.js";
 import { PanelArkDatabase } from "./panelark-db.js";
 import { applicationUpdatePolicy } from "./setup.js";
 
-export type UpdateChannel = "stable" | "beta";
+export type UpdateChannel = "stable";
 export type UpdatePhase = "idle" | "checking" | "available" | "current" | "downloading" | "prepared" | "applying" | "restarting" | "completed" | "rolled_back" | "failed";
 
 export interface AdapterCatalogUpdate {
@@ -87,7 +87,7 @@ export function validateReleaseManifest(value: unknown, publicKey: string, expec
   const manifest = value as ReleaseManifest;
   if (!manifest || manifest.schemaVersion !== 1 || manifest.product !== "PanelArk") throw new Error("更新清单格式无效");
   if (!VERSION_PATTERN.test(manifest.version) || !VERSION_PATTERN.test(manifest.minVersion)) throw new Error("更新清单版本格式无效");
-  if (!(["stable", "beta"] as string[]).includes(manifest.channel) || (expectedChannel && manifest.channel !== expectedChannel)) throw new Error("更新清单通道不匹配");
+  if (manifest.channel !== "stable" || (expectedChannel && manifest.channel !== expectedChannel)) throw new Error("正式版仅支持稳定更新通道");
   if (!/^[a-f0-9]{64}$/i.test(manifest.sha256)) throw new Error("更新包 SHA-256 格式无效");
   assertHttps(manifest.packageUrl, "更新包地址");
   if (manifest.adapterCatalog) {
@@ -121,11 +121,42 @@ export class PanelArkUpdateManager {
     this.updateDirectory = path.join(dataDirectory, "updates");
   }
 
+  private persistState(state: UpdateState) {
+    fs.mkdirSync(this.dataDirectory, { recursive: true });
+    const temporary = `${this.statePath}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(state, null, 2), { mode: 0o600 });
+    fs.renameSync(temporary, this.statePath);
+  }
+
   status(): UpdateState {
     if (fs.existsSync(this.statePath)) {
       try {
         const state = JSON.parse(fs.readFileSync(this.statePath, "utf8")) as UpdateState;
         const actualVersion = currentVersion();
+        const pending = ["checking", "available", "downloading", "prepared", "applying", "restarting"].includes(state.phase);
+        if (pending && state.targetVersion && compareVersions(actualVersion, state.targetVersion) >= 0) {
+          const superseded = compareVersions(actualVersion, state.targetVersion) > 0;
+          const timestamp = now();
+          const message = superseded
+            ? `当前已运行 v${actualVersion}，旧版 v${state.targetVersion} 的待更新状态已自动清理`
+            : `已更新至 v${actualVersion}`;
+          const reconciled: UpdateState = {
+            ...state,
+            phase: "completed",
+            progress: 100,
+            currentVersion: actualVersion,
+            targetVersion: actualVersion,
+            channel: "stable",
+            manifest: superseded ? undefined : state.manifest,
+            archivePath: undefined,
+            message,
+            error: undefined,
+            updatedAt: timestamp,
+            events: [...(state.events || []).slice(-98), { phase: "completed", progress: 100, message, at: timestamp }],
+          };
+          this.persistState(reconciled);
+          return reconciled;
+        }
         if (state.currentVersion !== actualVersion) {
           const reachedTarget = state.targetVersion === actualVersion;
           return {
@@ -148,18 +179,13 @@ export class PanelArkUpdateManager {
     const previous = this.status();
     const next: UpdateState = { ...previous, ...patch, updatedAt: now(), events: previous.events.slice(-99) };
     if (event) next.events.push({ phase: next.phase, progress: next.progress, message: next.message, at: next.updatedAt });
-    fs.mkdirSync(this.dataDirectory, { recursive: true });
-    const temporary = `${this.statePath}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, this.statePath);
+    this.persistState(next);
     return next;
   }
 
-  private manifestUrl(channel: UpdateChannel) {
-    const configured = channel === "beta" ? process.env.PANELARK_BETA_MANIFEST_URL : process.env.PANELARK_UPDATE_MANIFEST_URL;
-    return assertHttps(configured || (channel === "beta"
-      ? "https://github.com/wstimin/xui-zhushou/releases/download/beta/release-manifest.json"
-      : "https://github.com/wstimin/xui-zhushou/releases/latest/download/release-manifest.json"), "更新清单地址");
+  private manifestUrl() {
+    const configured = process.env.PANELARK_UPDATE_MANIFEST_URL;
+    return assertHttps(configured || "https://github.com/wstimin/xui-zhushou/releases/latest/download/release-manifest.json", "更新清单地址");
   }
 
   async check(channel: UpdateChannel) {
@@ -169,7 +195,7 @@ export class PanelArkUpdateManager {
     this.checking = true;
     try {
       this.write({ phase: "checking", progress: 5, currentVersion: version, channel, message: `正在检查${channel === "stable" ? "稳定" : "测试"}通道` });
-      const response = await fetch(this.manifestUrl(channel), { signal: AbortSignal.timeout(15_000), headers: { accept: "application/json" } });
+      const response = await fetch(this.manifestUrl(), { signal: AbortSignal.timeout(15_000), headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`更新清单请求失败（HTTP ${response.status}）`);
       const manifest = validateReleaseManifest(await response.json(), this.publicKey, channel);
       if (compareVersions(version, manifest.minVersion) < 0) throw new Error(`当前版本低于更新所需最低版本 ${manifest.minVersion}`);

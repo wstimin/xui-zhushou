@@ -25,7 +25,7 @@ export interface SessionRecord { id: string; ip?: string; user_agent?: string; c
 export interface BackupRecord { id: string; filename: string; reason: string; size_bytes: number; created_at: string }
 export interface UpdateState {
   phase: 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'prepared' | 'applying' | 'restarting' | 'completed' | 'rolled_back' | 'failed';
-  progress: number; currentVersion: string; targetVersion?: string; channel: 'stable' | 'beta'; message: string;
+  progress: number; currentVersion: string; targetVersion?: string; channel: 'stable'; message: string;
   checkedAt?: string; updatedAt: string; preUpdateBackup?: string; error?: string;
   manifest?: { version: string; publishedAt: string; notes: string[]; adapterCatalog?: { version: string } };
   events: Array<{ phase: string; progress: number; message: string; at: string }>;
@@ -106,7 +106,7 @@ export const adminApi = {
   restoreBackup: (id: string, passphrase: string) => api<{ success: true; message: string; preRestoreSnapshot: string }>(`/backups/${id}/restore`, { method: 'POST', body: JSON.stringify({ passphrase }) }),
   uploadBackup: (file: File) => api<{ success: true; id: string; filename: string }>('/backups/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }),
   updateStatus: () => api<{ success: true; state: UpdateState; adapterCatalogVersion: string; signingConfigured: boolean; applicationUpdateSupported: boolean; applicationUpdateHint: string }>('/update/status'),
-  checkUpdate: (channel: 'stable' | 'beta') => api<{ success: true; state: UpdateState }>('/update/check', { method: 'POST', body: JSON.stringify({ channel }) }),
+  checkUpdate: () => api<{ success: true; state: UpdateState }>('/update/check', { method: 'POST', body: JSON.stringify({ channel: 'stable' }) }),
   prepareUpdate: () => api<{ success: true; state: UpdateState }>('/update/prepare', { method: 'POST', body: '{}' }),
   applyUpdate: () => api<{ success: true; state: UpdateState }>('/update/apply', { method: 'POST', body: '{}' }),
   updateAdapters: () => api<{ success: true; version: string; updated: number }>('/update/adapters', { method: 'POST', body: '{}' }),

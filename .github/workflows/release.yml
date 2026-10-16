@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "One-confirmation online update|Passwordless managed pre-update snapshot|Bundled production dependencies|Automatic health-check rollback"
+          PANELARK_RELEASE_NOTES: "Clear stale update progress safely|Stable channel only|Stop terminal progress animation|Prevent accidental downgrade"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

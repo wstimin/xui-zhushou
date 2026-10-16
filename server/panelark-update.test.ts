@@ -24,6 +24,7 @@ function signedManifest(version = "2.1.0"): { manifest: ReleaseManifest; publicK
 test("signed release manifest rejects tampering and insecure sources", () => {
   const { manifest, publicKey } = signedManifest();
   assert.equal(validateReleaseManifest(manifest, publicKey, "stable").version, "2.1.0");
+  assert.throws(() => validateReleaseManifest({ ...manifest, channel: "beta" }, publicKey, "stable"), /稳定更新通道/);
   assert.throws(() => validateReleaseManifest({ ...manifest, version: "9.9.9" }, publicKey, "stable"), /签名/);
   assert.throws(() => validateReleaseManifest({ ...manifest, packageUrl: "http://example.test/release.tgz" }, publicKey, "stable"), /HTTPS/);
   assert.equal(compareVersions("2.1.0", "2.0.9"), 1);
@@ -44,7 +45,7 @@ test("update state and security report survive independently of the release dire
     const { publicKey } = signedManifest();
     const manager = new PanelArkUpdateManager(db, directory, publicKey);
     assert.equal(manager.status().phase, "idle");
-    fs.writeFileSync(path.join(directory, "update-state.json"), JSON.stringify({ phase: "restarting", progress: 86, currentVersion: "2.0.2", targetVersion: "2.1.0", channel: "stable", message: "restarting", updatedAt: new Date().toISOString(), events: [] }));
+    fs.writeFileSync(path.join(directory, "update-state.json"), JSON.stringify({ phase: "restarting", progress: 86, currentVersion: "2.0.2", targetVersion: "99.0.0", channel: "stable", message: "restarting", updatedAt: new Date().toISOString(), events: [] }));
     const afterRestart = new PanelArkUpdateManager(db, directory, publicKey);
     assert.equal(afterRestart.status().phase, "restarting");
     assert.equal(afterRestart.status().progress, 86);
@@ -55,6 +56,29 @@ test("update state and security report survive independently of the release dire
     db.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("a stale prepared update older than the running version is completed and persisted safely", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-stale-update-"));
+  const db = await PanelArkDatabase.open(path.join(directory, "panelark.sqlite"));
+  const statePath = path.join(directory, "update-state.json");
+  const runningVersion = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8")).version as string;
+  fs.writeFileSync(statePath, JSON.stringify({
+    phase: "prepared", progress: 50, currentVersion: "2.2.6", targetVersion: "2.2.6", channel: "stable",
+    message: "等待应用", archivePath: path.join(directory, "updates", "panelark-2.2.6.tar.gz"), updatedAt: new Date().toISOString(), events: [],
+  }));
+  try {
+    const result = new PanelArkUpdateManager(db, directory, "test-key").status();
+    assert.equal(result.phase, "completed");
+    assert.equal(result.progress, 100);
+    assert.equal(result.currentVersion, runningVersion);
+    assert.equal(result.targetVersion, runningVersion);
+    assert.equal(result.archivePath, undefined);
+    assert.match(result.message, /旧版 v2\.2\.6.*自动清理/);
+    const persisted = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    assert.equal(persisted.phase, "completed");
+    assert.equal(persisted.progress, 100);
+  } finally { db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
 test("detecting a newer signed release only reads metadata; no backup, package download or application occurs", async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-check-only-"));
