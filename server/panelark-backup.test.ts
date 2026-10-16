@@ -17,6 +17,8 @@ test("TOTP accepts the active time window and rejects invalid codes", () => {
 });
 
 test("encrypted .pgbak round-trips core data and rejects a wrong password", async () => {
+  const previousAppVersion = process.env.APP_VERSION;
+  process.env.APP_VERSION = "2.1.9-acceptance";
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-backup-"));
   fs.writeFileSync(path.join(directory, "panelark.secret"), Buffer.alloc(32, 7));
   const db = await PanelArkDatabase.open(path.join(directory, "panelark.sqlite"));
@@ -28,12 +30,14 @@ test("encrypted .pgbak round-trips core data and rejects a wrong password", asyn
     assert.throws(() => decryptBackup(archive, "Wrong-Pass!!2026"), /密码错误|损坏/);
     const preview = backupPreview(archive, "Backup-Pass!2026");
     assert.equal(preview.product, "PanelArk");
+    assert.equal(preview.appVersion, "2.1.9-acceptance");
     assert.ok(preview.excludes.includes("SSH 私钥"));
     const payload = decryptBackup(archive, "Backup-Pass!2026");
     db.run("UPDATE site_settings SET value = 'changed' WHERE key = 'site_notice'");
     db.replaceFromBytes(Buffer.from(payload.database, "base64"));
     assert.equal(db.get("SELECT value FROM site_settings WHERE key = 'site_notice'")?.value, "backup-test");
   } finally {
+    if (previousAppVersion === undefined) delete process.env.APP_VERSION; else process.env.APP_VERSION = previousAppVersion;
     db.close();
     fs.rmSync(directory, { recursive: true, force: true });
   }

@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
 
 const installer = readFileSync(new URL("../install.sh", import.meta.url), "utf8");
+
+test("PM2 reads the release version instead of inheriting a previous updater version", () => {
+  const previous = process.env.APP_VERSION;
+  process.env.APP_VERSION = "0.0.1-stale";
+  try {
+    const require = createRequire(import.meta.url);
+    const config = require("../ecosystem.config.cjs");
+    const pkg = require("../package.json");
+    assert.equal(config.apps[0].env.APP_VERSION, pkg.version);
+  } finally {
+    if (previous === undefined) delete process.env.APP_VERSION; else process.env.APP_VERSION = previous;
+  }
+});
 
 test("one-click installer uses a supported LTS runtime and verifies node plus npm", () => {
   assert.match(installer, /MIN_NODE_MAJOR="24"/);
