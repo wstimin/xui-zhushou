@@ -80,6 +80,7 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     await click('系统更新'); await click('检测更新');
     assert.doesNotMatch(document.body.textContent!, /测试通道/);
     assert.deepEqual(requests.find(item => item.path === '/update/check')?.body, { channel: 'stable' });
+    assert.equal(document.querySelector('.progress-track.large'), null);
     assert.match(dialog().textContent!, /检测不会下载或安装/); assert.equal(updates().length, 0); await dismiss();
     await click('下载并安装更新'); assert.equal(dialog().querySelector('input'), null); await click('取消', dialog()); assert.equal(updates().length, 0);
     await click('下载并安装更新'); assert.equal(dialog().querySelector('input'), null); await click('确认', dialog());

@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Clear stale update progress safely|Stable channel only|Stop terminal progress animation|Prevent accidental downgrade"
+          PANELARK_RELEASE_NOTES: "Update checks no longer show installation progress|Progress appears only during download, apply and restart|Stable channel only"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

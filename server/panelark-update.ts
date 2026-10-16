@@ -200,7 +200,7 @@ export class PanelArkUpdateManager {
       const manifest = validateReleaseManifest(await response.json(), this.publicKey, channel);
       if (compareVersions(version, manifest.minVersion) < 0) throw new Error(`当前版本低于更新所需最低版本 ${manifest.minVersion}`);
       const available = compareVersions(manifest.version, version) > 0;
-      return this.write({ phase: available ? "available" : "current", progress: 15, targetVersion: manifest.version, manifest, checkedAt: now(), message: available ? `发现新版本 v${manifest.version}` : "当前已经是最新版本", error: undefined });
+      return this.write({ phase: available ? "available" : "current", progress: 0, targetVersion: manifest.version, manifest, checkedAt: now(), message: available ? `发现新版本 v${manifest.version}` : "当前已经是最新版本", error: undefined });
     } catch (error) {
       this.write({ phase: "failed", progress: 0, message: "更新检查失败", error: error instanceof Error ? error.message : String(error) });
       throw error;

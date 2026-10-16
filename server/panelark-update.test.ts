@@ -91,7 +91,7 @@ test("detecting a newer signed release only reads metadata; no backup, package d
     const manager = new PanelArkUpdateManager(db, directory, publicKey);
     const before = fs.readdirSync(directory);
     const result = await manager.check("stable");
-    assert.equal(result.phase, "available"); assert.equal(result.targetVersion, "99.0.0");
+    assert.equal(result.phase, "available"); assert.equal(result.progress, 0); assert.equal(result.targetVersion, "99.0.0");
     assert.equal(result.preUpdateBackup, undefined);
     assert.deepEqual(fs.readdirSync(directory).filter(name => name !== "update-state.json"), before);
     assert.equal(db.get<{ total: number }>("SELECT COUNT(*) AS total FROM backup_records")?.total, 0);
