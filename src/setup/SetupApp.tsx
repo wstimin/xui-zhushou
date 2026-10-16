@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { ArrowRight, Check, CheckCircle2, Database, Layers3, LoaderCircle, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, Database, LoaderCircle, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { PanelArkMark } from '../components/PanelArkMark';
 import './setup.css';
 
 interface SetupState {
@@ -43,7 +44,7 @@ export default function SetupApp() {
     finally { setBusy(false); }
   };
   return <main className="setup-shell">
-    <div className="setup-brand"><span className="brand-mark"><Layers3 size={22} /></span><strong>PanelArk <span>面板方舟</span></strong></div>
+    <div className="setup-brand"><span className="brand-mark"><PanelArkMark size={30} /></span><strong>PanelArk <span>面板方舟</span></strong></div>
     <section className="setup-card glass-card" aria-labelledby="setup-title">
       <span className="eyebrow plain">Web installation</span>
       <h1 id="setup-title">{adminPath ? '安装完成，可以开始使用了' : state && !state.required ? '此站点已经安装完成' : '欢迎，完成你的站点安装'}</h1>

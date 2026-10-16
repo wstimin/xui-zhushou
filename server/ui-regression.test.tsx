@@ -8,9 +8,28 @@ import { PurchaseLink } from '../src/panelark/PurchaseLink.js';
 import { CatalogPage, CdkGateModal, Header, HomePage } from '../src/panelark/ui.js';
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
+import { PanelArkMark } from '../src/components/PanelArkMark.js';
 import { JSDOM } from 'jsdom';
 
 const noop = () => {};
+test('all brand surfaces use the shared PanelArk symbol and favicon', () => {
+  const symbol = renderToStaticMarkup(<PanelArkMark size={24} aria-label="PanelArk" />);
+  assert.match(symbol, /data-panelark-mark=""/);
+  assert.match(symbol, /viewBox="0 0 24 24"/);
+  assert.match(symbol, /fill-rule="evenodd"/);
+
+  const header = renderToStaticMarkup(<Header theme="light" view="home" mobileMenuOpen={false} deploymentUnlocked={false} serverConnected={false} onToggleTheme={noop} onToggleMenu={noop} onViewChange={noop} onConnect={noop} purchaseEnabled={false} purchaseButtonText="购买 CDK" />);
+  const admin = renderToStaticMarkup(<AdminAccess mode="login" theme="dark" onToggleTheme={noop} notice={null} setNotice={noop} onAuthenticated={noop} />);
+  for (const surface of [header, admin]) {
+    assert.match(surface, /data-panelark-mark=""/);
+    assert.doesNotMatch(surface, /lucide-layers-3/);
+  }
+
+  const favicon = fs.readFileSync(new URL('../public/favicon.svg', import.meta.url), 'utf8');
+  const document = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(favicon, /fill="#e0b83a"/);
+  assert.match(document, /rel="icon" href="\/favicon\.svg" type="image\/svg\+xml"/);
+});
 test('CDK step frame keeps symmetric inner padding without changing the original font size', () => {
   const html = renderToStaticMarkup(<CdkGateModal purchaseEnabled purchaseButtonText="购买 CDK" onClose={noop} onVerified={noop} />);
   const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');

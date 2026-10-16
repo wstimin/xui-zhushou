@@ -3,7 +3,7 @@
 .admin-shell{grid-template-columns:240px minmax(0,1fr);background:var(--bg-primary)}
 .admin-sidebar{padding:24px 16px 18px;background:var(--bg-secondary);backdrop-filter:blur(16px)}
 .admin-brand{padding-bottom:24px;line-height:1.3}
-.admin-brand strong,.admin-access-brand strong{font-family:"Playfair Display","PingFang SC","Microsoft YaHei",serif;font-size:22px;letter-spacing:-.5px}
+.admin-brand strong,.admin-access-brand strong{font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif;font-size:21px;font-weight:780;letter-spacing:-.6px}
 .admin-brand small{font-size:10px;letter-spacing:.12em;line-height:1.5}
 .admin-nav{flex:1;min-height:0;overflow-y:auto;align-content:start;gap:4px}
 .admin-nav button{min-height:44px;padding:10px 12px;font-size:14px;font-weight:500;transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease}

@@ -16,6 +16,7 @@ import { usePagedList } from './pagination';
 import { allPackageOptions } from './api';
 import { ThemeToggle, useTheme } from '../panelark/theme';
 import type { Theme } from '../panelark/types';
+import { PanelArkMark } from '../components/PanelArkMark';
 
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
@@ -61,7 +62,7 @@ function AdminAppContent() {
 
   return <div className="admin-shell">
     <aside className={`admin-sidebar ${menuOpen ? 'open' : ''}`}>
-      <div className="admin-brand"><span className="brand-mark"><Layers3 size={18} /></span><div><strong>Panel<span>Ark</span></strong><small>CONTROL CENTER</small></div><button onClick={() => setMenuOpen(false)} aria-label="关闭菜单"><X size={18} /></button></div>
+      <div className="admin-brand"><span className="brand-mark"><PanelArkMark size={29} /></span><div><strong>PanelArk</strong><small>CONTROL CENTER</small></div><button onClick={() => setMenuOpen(false)} aria-label="关闭菜单"><X size={18} /></button></div>
       <nav className="admin-nav">
         <AdminNav active={view === 'overview'} icon={Gauge} label="业务概览" onClick={() => navigate('overview')} />
         <AdminNav active={view === 'jobs'} icon={Activity} label="任务售后" onClick={() => navigate('jobs')} />
@@ -105,7 +106,7 @@ function AdminAppContent() {
 }
 
 function AdminLoading() {
-  return <div className="admin-loading"><div className="brand-mark"><Layers3 size={21} /></div><LoaderCircle className="spin" size={22} /><span>正在建立安全管理会话…</span></div>;
+  return <div className="admin-loading"><div className="brand-mark"><PanelArkMark size={30} /></div><LoaderCircle className="spin" size={22} /><span>正在建立安全管理会话…</span></div>;
 }
 
 export function AdminAccess({ mode, theme, onToggleTheme, onAuthenticated, notice, setNotice }: { mode: 'bootstrap' | 'login'; theme: Theme; onToggleTheme: () => void; onAuthenticated: (admin: AdminIdentity) => void; notice: Notice; setNotice: (notice: Notice) => void }) {
@@ -130,7 +131,7 @@ export function AdminAccess({ mode, theme, onToggleTheme, onAuthenticated, notic
     <div className="admin-access-theme"><ThemeToggle theme={theme} onToggle={onToggleTheme} /></div>
     <div className="admin-access-glow" />
     <form noValidate className="admin-access-card" onSubmit={submit}>
-      <div className="admin-access-brand"><span className="brand-mark"><Layers3 size={20} /></span><strong>Panel<span>Ark</span></strong></div>
+      <div className="admin-access-brand"><span className="brand-mark"><PanelArkMark size={30} /></span><strong>PanelArk</strong></div>
       <span className="admin-kicker">{mode === 'bootstrap' ? 'FIRST RUN SECURITY' : 'CONTROL CENTER'}</span>
       <h1>{mode === 'bootstrap' ? '初始化管理后台' : '欢迎回来'}</h1>
       <p>{mode === 'bootstrap' ? '首次启动需要初始化令牌。此入口仅供宝塔 / 1Panel 部署初始化；一键脚本请在 SSH 终端运行 pa init。' : '登录后管理 CDK、购买入口与站点。未启用双重验证的账号，只需用户名和密码。'}</p>

@@ -16,7 +16,6 @@ import {
   FileCode2,
   HardDrive,
   KeyRound,
-  Layers3,
   LockKeyhole,
   Menu,
   MemoryStick,
@@ -60,6 +59,7 @@ import {
 } from './api';
 import type { ActiveServer, CatalogItem, ServerDraft, Theme, View } from './types';
 import { PurchaseLink } from './PurchaseLink';
+import { PanelArkMark } from '../components/PanelArkMark';
 
 export function Header({
   theme,
@@ -90,8 +90,8 @@ export function Header({
     <header className="site-header">
       <div className="nav-wrap">
         <button className="brand" onClick={() => onViewChange('home')} aria-label="返回首页">
-          <span className="brand-mark"><Layers3 size={19} strokeWidth={1.8} /></span>
-          <span className="brand-word">Panel<span>Ark</span></span>
+          <span className="brand-mark"><PanelArkMark size={29} /></span>
+          <span className="brand-word">PanelArk</span>
         </button>
 
         <nav className={`main-nav ${mobileMenuOpen ? 'is-open' : ''}`} aria-label="主导航">
@@ -421,7 +421,7 @@ export function AboutPage({ onViewPanels }: { onViewPanels: () => void }) {
   return (
     <section className="section-shell page-section about-page">
       <div className="about-hero glass-card">
-        <div className="about-mark"><Layers3 size={34} /></div><span className="eyebrow plain">About PanelArk</span>
+        <div className="about-mark"><PanelArkMark size={62} /></div><span className="eyebrow plain">About PanelArk</span>
         <h1>把复杂留在系统里，<br /><em>把确定性交给用户。</em></h1>
         <p>PanelArk 面向需要快速交付 VPS 面板的用户与服务者，专注安装前检查、可靠执行和可直接交付的结果。</p>
         <button className="button button-primary" onClick={onViewPanels}>查看支持面板 <ArrowRight size={16} /></button>
@@ -438,7 +438,7 @@ export function AboutPage({ onViewPanels }: { onViewPanels: () => void }) {
 export function Footer({ onNavigate }: { onNavigate: (view: View) => void }) {
   return (
     <footer className="site-footer"><div className="footer-inner">
-      <div><div className="brand footer-brand"><span className="brand-mark"><Layers3 size={17} /></span><span className="brand-word">Panel<span>Ark</span></span></div><p>连接服务器，一键装好所需面板。</p></div>
+      <div><div className="brand footer-brand"><span className="brand-mark"><PanelArkMark size={27} /></span><span className="brand-word">PanelArk</span></div><p>连接服务器，一键装好所需面板。</p></div>
       <div className="footer-links"><button onClick={() => onNavigate('deploy')}>面板部署</button><button onClick={() => onNavigate('tools')}>工具箱</button><button onClick={() => onNavigate('docs')}>使用文档</button><button onClick={() => onNavigate('about')}>关于我们</button></div>
       <span className="footer-note">PanelArk · Secure deployment access</span>
     </div></footer>
