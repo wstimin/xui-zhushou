@@ -75,11 +75,14 @@ export function backupPreview(archive: Uint8Array, passphrase: string) {
 export function createBackupArchive(db: PanelArkDatabase, dataDirectory: string, passphrase: string) {
   const secretPath = path.join(dataDirectory, "panelark.secret");
   if (!fs.existsSync(secretPath)) throw new Error("CDK 密钥不存在，不能创建可迁移备份");
+  const versionFile = path.join(process.cwd(), "VERSION");
+  const appVersion = process.env.APP_VERSION || process.env.npm_package_version
+    || (fs.existsSync(versionFile) ? fs.readFileSync(versionFile, "utf8").trim() : JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")).version);
   return encryptBackup({
     format: 1,
     product: "PanelArk",
     createdAt: new Date().toISOString(),
-    appVersion: process.env.npm_package_version || "2.1.2",
+    appVersion,
     database: db.exportBytes().toString("base64"),
     cdkPepper: fs.readFileSync(secretPath).toString("base64"),
   }, passphrase);

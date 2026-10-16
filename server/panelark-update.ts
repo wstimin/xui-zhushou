@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, verify } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { saveBackup } from "./panelark-backup.js";
 import { PanelArkDatabase } from "./panelark-db.js";
 
@@ -217,8 +217,19 @@ export class PanelArkUpdateManager {
     const runner = path.join(process.cwd(), "scripts", "apply-update.mjs");
     if (!fs.existsSync(runner)) throw new Error("更新执行器缺失，请使用正式发布包安装");
     const next = this.write({ phase: "applying", progress: 55, message: "更新执行器已启动，服务将短暂重启" });
-    const child = spawn(process.execPath, [runner, "--state", this.statePath, "--target", process.cwd()], { detached: true, stdio: "ignore", cwd: process.cwd() });
-    child.unref();
+    // PM2 terminates application descendants during reload, even detached ones.
+    // A transient system service owns the updater independently of the web app.
+    const service = spawnSync("systemd-run", [
+      "--quiet", "--collect", `--unit=panelark-update-${Date.now()}`,
+      "--property=Type=exec", `--working-directory=${process.cwd()}`,
+      "--setenv=NODE_ENV=production", `--setenv=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
+      process.execPath, runner, "--state", this.statePath, "--target", process.cwd(),
+    ], { encoding: "utf8", timeout: 15_000 });
+    if (service.error || service.status !== 0) {
+      const error = `无法启动独立更新服务：${service.error?.message || service.stderr || "请使用 sy install 更新"}`;
+      this.write({ phase: "failed", progress: 0, message: "更新执行器未启动，当前版本未发生变化", error });
+      throw new Error(error);
+    }
     return next;
   }
 }
