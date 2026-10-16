@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-#  3x-ui 部署助手面板 (Deploy Assistant) - 一键管理与 SSL 自动化脚本
+#  PanelArk 面板方舟 - 一键安装、更新与 SSL 管理脚本
 #  支持系统: Ubuntu 20.04+, Debian 11+, CentOS 8+ / Rocky Linux / AlmaLinux
 # ==============================================================================
 
 set -e
+set -o pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -24,6 +25,7 @@ SSL_DIR="/etc/3xui-assistant/ssl"
 PANELARK_STATE_DIR="/var/lib/panelark"
 DEFAULT_PORT="1888"
 APP_PORT="${PORT:-$DEFAULT_PORT}"
+MIN_NODE_MAJOR="24"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTIVE_PROJECT_DIR="$TARGET_DIR"
 
@@ -164,12 +166,53 @@ pause_if_tty() {
 install_base_deps() {
   echo -e "${BLUE}[INFO] 正在检查并补全运行构建包所需的基础依赖...${NC}"
   if [ "$PKG_MANAGER" = "apt" ]; then
-    apt-get update -y > /dev/null 2>&1 || true
-    apt-get install -y curl ca-certificates lsof net-tools socat openssl tar > /dev/null 2>&1
+    env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -y > /dev/null 2>&1 || true
+    env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y curl ca-certificates gnupg lsof net-tools socat openssl tar > /dev/null 2>&1
   else
     $PKG_MANAGER update -y > /dev/null 2>&1 || true
     $PKG_MANAGER install -y curl ca-certificates lsof net-tools socat openssl tar > /dev/null 2>&1
   fi
+}
+
+install_node_runtime() {
+  local setup_script setup_url installed_major
+  setup_script=$(mktemp)
+  if [ "$PKG_MANAGER" = "apt" ]; then
+    setup_url="https://deb.nodesource.com/setup_${MIN_NODE_MAJOR}.x"
+  else
+    setup_url="https://rpm.nodesource.com/setup_${MIN_NODE_MAJOR}.x"
+  fi
+
+  echo -e "${BLUE}[INFO] 正在下载并执行 NodeSource Node.js ${MIN_NODE_MAJOR} LTS 安装配置...${NC}"
+  if ! curl -fsSL --retry 3 --connect-timeout 15 "$setup_url" -o "$setup_script"; then
+    rm -f "$setup_script"
+    echo -e "${RED}[ERROR] NodeSource 配置脚本下载失败，已停止安装。${NC}"
+    return 1
+  fi
+  if ! env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a bash "$setup_script"; then
+    rm -f "$setup_script"
+    echo -e "${RED}[ERROR] NodeSource 软件源配置失败，已停止安装。${NC}"
+    return 1
+  fi
+  rm -f "$setup_script"
+
+  if [ "$PKG_MANAGER" = "apt" ]; then
+    env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y nodejs > /dev/null 2>&1
+  else
+    $PKG_MANAGER install -y nodejs > /dev/null 2>&1
+  fi
+  hash -r
+
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo -e "${RED}[ERROR] Node.js 安装后未检测到 node 与 npm，已停止安装。${NC}"
+    return 1
+  fi
+  installed_major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)
+  if ! [[ "$installed_major" =~ ^[0-9]+$ ]] || [ "$installed_major" -lt "$MIN_NODE_MAJOR" ]; then
+    echo -e "${RED}[ERROR] Node.js 安装后版本仍低于 ${MIN_NODE_MAJOR}（当前: $(node -v 2>/dev/null || echo 未知)），已停止安装。${NC}"
+    return 1
+  fi
+  echo -e "${GREEN}[OK] Node.js 与 npm 已安装并验证: $(node -v) / npm $(npm -v)${NC}"
 }
 
 get_public_ip() {
@@ -293,7 +336,7 @@ check_environment() {
 
 install_assistant() {
   echo -e "${CYAN}============================================================${NC}"
-  echo -e "${BOLD}       🚀 安装 / 更新 3x-ui 部署助手面板 (Deploy Assistant)      ${NC}"
+  echo -e "${BOLD}             🚀 安装 / 更新 PanelArk 面板方舟             ${NC}"
   echo -e "${CYAN}============================================================${NC}"
 
   echo -e "${BLUE}[1/5] 检查并补全系统必要依赖...${NC}"
@@ -317,32 +360,33 @@ install_assistant() {
   NEED_NODE_INSTALL=false
   if ! command -v node &> /dev/null; then
     NEED_NODE_INSTALL=true
-    echo -e "${YELLOW}[INFO] 未检测到 Node.js 环境，准备自动安装 Node.js LTS (v20)...${NC}"
+    echo -e "${YELLOW}[INFO] 未检测到 Node.js 环境，准备自动安装 Node.js ${MIN_NODE_MAJOR} LTS...${NC}"
   else
     NODE_MAJOR_VER=$(node -v | cut -d'.' -f1 | sed 's/v//')
-    if [ "$NODE_MAJOR_VER" -lt 20 ]; then
+    if [ "$NODE_MAJOR_VER" -lt "$MIN_NODE_MAJOR" ] || ! command -v npm >/dev/null 2>&1; then
       NEED_NODE_INSTALL=true
-      echo -e "${YELLOW}[WARN] 当前 Node.js 版本 (v${NODE_MAJOR_VER}) 过低，准备自动升级至 Node.js LTS (v20)...${NC}"
+      echo -e "${YELLOW}[WARN] 当前 Node.js/npm 环境不符合要求，准备自动升级至 Node.js ${MIN_NODE_MAJOR} LTS...${NC}"
     else
       echo -e "${GREEN}[OK] Node.js 环境正常: $(node -v)${NC}"
     fi
   fi
 
   if [ "$NEED_NODE_INSTALL" = true ]; then
-    echo -e "${BLUE}[INFO] 正在配置 NodeSource 源并安装 Node.js v20 LTS...${NC}"
-    if [ "$PKG_MANAGER" = "apt" ]; then
-      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-      apt-get install -y nodejs > /dev/null 2>&1
-    else
-      curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-      $PKG_MANAGER install -y nodejs > /dev/null 2>&1
+    if ! install_node_runtime; then
+      rm -rf "$DOWNLOADED_WORK_DIR"
+      pause_if_tty
+      return 1
     fi
-    echo -e "${GREEN}[OK] Node.js 已成功更新安装: $(node -v)${NC}"
   fi
 
   echo -e "${BLUE}[4/5] 安装生产运行依赖并切换到新构建包...${NC}"
   cd "$DOWNLOADED_PACKAGE_DIR"
-  npm ci --omit=dev --ignore-scripts
+  if ! npm ci --omit=dev --ignore-scripts; then
+    rm -rf "$DOWNLOADED_WORK_DIR"
+    echo -e "${RED}[ERROR] 生产运行依赖安装失败，旧版本未被替换。${NC}"
+    pause_if_tty
+    return 1
+  fi
 
   if ! command -v pm2 &> /dev/null; then
     echo -e "${YELLOW}正在全局安装 PM2 进程管理器...${NC}"
@@ -397,7 +441,7 @@ install_assistant() {
 
   # 更新只替换应用构建包；.env、独立数据目录与 /etc 下的 SSL 证书保持不变。
   if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
-    echo -e "${YELLOW}检测到部署助手面板正在运行，正在重启服务...${NC}"
+    echo -e "${YELLOW}检测到 PanelArk 正在运行，正在重启服务...${NC}"
     if ! pm2 startOrReload ecosystem.config.cjs --update-env; then
       echo -e "${RED}[ERROR] 新构建包启动失败。${NC}"
       restore_previous_release
@@ -436,7 +480,7 @@ install_assistant() {
   get_public_ip
 
   echo -e "${GREEN}\n============================================================"
-  echo " 🎉 3x-ui 部署助手面板已成功安装/更新并在后台稳定运行！"
+  echo " 🎉 PanelArk 面板方舟已成功安装/更新并在后台稳定运行！"
   echo "============================================================"
   echo -e "${NC}"
 
@@ -555,7 +599,7 @@ issue_ssl_cert() {
   fi
 
   # 4. 安装/导出证书并推送到本系统
-  echo -e "\n${BLUE}[4/4] 正在安装证书文件并推送到本部署助手面板配置...${NC}"
+  echo -e "\n${BLUE}[4/4] 正在安装证书文件并应用到 PanelArk...${NC}"
   "$ACME_BIN" --install-cert -d "$DOMAIN_NAME" \
     --key-file "$SSL_DIR/key.pem" \
     --fullchain-file "$SSL_DIR/cert.pem" \
@@ -567,13 +611,13 @@ issue_ssl_cert() {
 
   # 自动重启 PM2 部署助手，使得 server.ts 自动加载 HTTPS 证书
   if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
-    echo -e "${BLUE}[INFO] 正在重启本部署助手面板 PM2 进程以平滑升级至 HTTPS...${NC}"
+    echo -e "${BLUE}[INFO] 正在重启 PanelArk PM2 进程以平滑升级至 HTTPS...${NC}"
     pm2 restart "$APP_NAME" --update-env
     echo -e "${GREEN}[SUCCESS] 本面板已完成 HTTPS 证书配置与应用更新！${NC}"
   fi
 
   echo -e "\n${GREEN}============================================================"
-  echo -e " 🎉 SSL 证书已成功安装并应用到本部署助手面板！"
+  echo -e " 🎉 SSL 证书已成功安装并应用到 PanelArk！"
   echo -e "============================================================"
   echo -e "🔒 绑定域名: ${CYAN}${DOMAIN_NAME}${NC}"
   echo -e "🌐 安全访问地址: ${CYAN}https://${DOMAIN_NAME}:${APP_PORT}${NC}"
@@ -587,7 +631,7 @@ issue_ssl_cert() {
 view_panel_info() {
   load_runtime_config
   echo -e "${CYAN}============================================================${NC}"
-  echo -e "${BOLD}            📊 当前部署助手面板与 SSL 运行状态信息            ${NC}"
+  echo -e "${BOLD}              📊 当前 PanelArk 与 SSL 运行状态              ${NC}"
   echo -e "${CYAN}============================================================${NC}"
 
   get_public_ip
@@ -596,7 +640,7 @@ view_panel_info() {
   echo -e "📦 ${BOLD}当前构建包版本:${NC} ${GREEN}v${APP_VERSION}${NC}"
 
   # 1. PM2 进程状态
-  echo -e "\n${BOLD}1️⃣  部署助手面板 PM2 服务状态:${NC}"
+  echo -e "\n${BOLD}1️⃣  PanelArk PM2 服务状态:${NC}"
   if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
     PM2_STATUS=$(pm2 jlist 2>/dev/null | grep -o '"status":"[^"]*"' | head -n1 | cut -d'"' -f4 || echo "online")
     echo -e "   - 进程名称: ${CYAN}${APP_NAME}${NC}"
@@ -650,7 +694,7 @@ uninstall_all() {
     pm2 save >/dev/null 2>&1 || true
   fi
 
-  echo -e "${BLUE}[2/3] 清理本部署助手面板项目目录 (${TARGET_DIR}) 及快捷调出指令...${NC}"
+  echo -e "${BLUE}[2/3] 清理 PanelArk 项目目录 (${TARGET_DIR}) 及快捷调出指令...${NC}"
   rm -rf "$TARGET_DIR"
   rm -f /usr/local/bin/sy /usr/bin/sy
 
@@ -661,7 +705,7 @@ uninstall_all() {
     echo -e "${GREEN}[OK] 面板 SSL 证书文件已完全清理！${NC}"
   fi
 
-  echo -e "${GREEN}\n🎉 本部署助手面板已彻底卸载并清理完毕！${NC}\n"
+  echo -e "${GREEN}\n🎉 PanelArk 已彻底卸载并清理完毕！${NC}\n"
   exit 0
 }
 
@@ -759,15 +803,15 @@ show_menu() {
     clear
     echo -e "${CYAN}"
     echo "============================================================"
-    echo "   🚀 3x-ui 部署助手面板 (Deploy Assistant) 一键管理工具    "
+    echo "          🚀 PanelArk 面板方舟一键管理工具          "
     echo "============================================================"
     echo -e "${NC}"
-    echo -e " ${BOLD}[1]${NC} 安装 / 更新 部署助手面板 (下载远端生产构建包)"
+    echo -e " ${BOLD}[1]${NC} 安装 / 更新 PanelArk (下载远端生产构建包)"
     echo -e " ${BOLD}[2]${NC} 仅申请域名 SSL 证书并推送到面板 (不安装或更新应用)"
     echo -e " ${BOLD}[3]${NC} 查看当前面板配置与运行状态信息"
     echo -e " ${BOLD}[4]${NC} 检测 VPS 系统与网络运行环境"
     echo -e " ${BOLD}[5]${NC} 🔍 一键诊断与解决【域名无法访问】问题"
-    echo -e " ${BOLD}[6]${NC} 卸载与清除部署助手面板项目"
+    echo -e " ${BOLD}[6]${NC} 卸载与清除 PanelArk 项目"
     echo -e " ${BOLD}[0]${NC} 退出脚本"
     echo "============================================================"
     

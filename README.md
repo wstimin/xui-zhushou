@@ -6,7 +6,7 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 
 - 用户端地址：`http://服务器IP:1888/`
 - 管理后台默认地址：`http://服务器IP:1888/admin`；超级管理员可在“站点配置”修改路径，保存后旧路径立即失效并自动跳转到新地址。
-- 首次启动且未设置 `PANELARK_SETUP_TOKEN` 时，初始化令牌写入 `data/admin-setup-token.txt`；完成超级管理员初始化后该文件自动删除。
+- 首次启动且未设置 `PANELARK_SETUP_TOKEN` 时，初始化令牌写入数据目录的 `admin-setup-token.txt`；一键安装后的完整路径为 `/var/lib/panelark/admin-setup-token.txt`，完成超级管理员初始化后该文件自动删除。
 - 系统不会自动创建任何 CDK。首次管理员初始化后，请从后台创建正式套餐和批次并安全保存一次性显示的授权码。
 - CDK 明文只在后台批次生成成功时显示一次，数据库仅保存不可逆哈希和末四位提示。
 - 购买按钮、购买链接、客服链接和站点公告均可从后台配置，外部链接必须使用 HTTPS。
@@ -42,7 +42,7 @@ bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/wstimin/xui-zhusho
 bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/wstimin/xui-zhushou/main/install.sh) install
 ```
 
-上述 `raw.githubusercontent.com` 地址只用于获取管理脚本。GitHub Actions 会在远端执行测试、类型检查和生产构建，并生成 Linux 生产构建包；管理脚本随后从 GitHub Latest Release 下载 `xui-zhushou-linux.tar.gz` 和 `SHA256SUMS`。VPS 不会下载应用源码，也不会执行 Vite、TypeScript 或其他源码构建。默认访问地址为：
+上述 `raw.githubusercontent.com` 地址只用于获取管理脚本。GitHub Actions 会在远端使用 Node.js 24 LTS 执行测试、类型检查和生产构建，并生成 Linux 生产构建包；管理脚本随后从 GitHub Latest Release 下载 `xui-zhushou-linux.tar.gz` 和 `SHA256SUMS`。VPS 不会下载应用源码，也不会执行 Vite、TypeScript 或其他源码构建；缺少运行环境时，脚本会自动安装并验证 Node.js 24 LTS、npm 与 PM2。默认访问地址为：
 
 ```text
 http://服务器IP:1888
@@ -79,7 +79,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.4`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.5`。
 
 ## 远端构建与发布
 

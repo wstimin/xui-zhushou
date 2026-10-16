@@ -1,6 +1,6 @@
 {
-  "name": "xui面板一键搭建助手",
-  "description": "专注 xui面板 与节点（支持协议联动与 SOCKS 链式代理）的一键搭建助手",
+  "name": "PanelArk 面板方舟",
+  "description": "面向多种 Linux 面板与服务器工具的自动环境检测、依赖补齐、安装验证和安全交付平台",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

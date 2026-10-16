@@ -124,7 +124,7 @@ function AdminAccess({ mode, onAuthenticated, notice, setNotice }: { mode: 'boot
       <div className="admin-access-brand"><span className="brand-mark"><Layers3 size={20} /></span><strong>Panel<span>Ark</span></strong></div>
       <span className="admin-kicker">{mode === 'bootstrap' ? 'FIRST RUN SECURITY' : 'CONTROL CENTER'}</span>
       <h1>{mode === 'bootstrap' ? '初始化管理后台' : '欢迎回来'}</h1>
-      <p>{mode === 'bootstrap' ? '首次启动需要初始化令牌。令牌默认保存在服务器 data/admin-setup-token.txt，也可由环境变量指定。' : '登录后管理 CDK、购买入口、账号权限与操作审计。'}</p>
+      <p>{mode === 'bootstrap' ? '首次启动需要初始化令牌。一键安装后令牌保存在服务器 /var/lib/panelark/admin-setup-token.txt，也可由环境变量指定。' : '登录后管理 CDK、购买入口、账号权限与操作审计。'}</p>
       {mode === 'bootstrap' && <label className="admin-field"><span>初始化令牌</span><input type="password" value={setupToken} onChange={event => setSetupToken(event.target.value)} required autoComplete="off" placeholder="PAK-SETUP-…" /></label>}
       <label className="admin-field"><span>管理员用户名</span><input value={username} onChange={event => setUsername(event.target.value)} required autoComplete="username" placeholder="panelark_admin" /></label>
       <label className="admin-field"><span>{mode === 'bootstrap' ? '设置强密码' : '登录密码'}</span><input type="password" value={password} onChange={event => setPassword(event.target.value)} required autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'} placeholder={mode === 'bootstrap' ? '至少 12 位，含大小写、数字和符号' : '输入管理密码'} /></label>
