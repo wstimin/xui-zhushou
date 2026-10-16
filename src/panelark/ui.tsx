@@ -632,7 +632,7 @@ function DeploymentFlow({ step, compact = false }: { step: 1 | 2 | 3; compact?: 
     {steps.map((label, index) => {
       const number = index + 1;
       const state = number < step ? 'done' : number === step ? 'active' : '';
-      return <div className={state} key={label}><span>{number < step ? <Check size={13} /> : number}</span><strong>{label}</strong>{index < steps.length - 1 && <i />}</div>;
+      return <div className={state} key={label} aria-current={number === step ? 'step' : undefined}><span>{number < step ? <Check size={13} /> : number}</span><strong>{label}</strong>{index < steps.length - 1 && <i aria-hidden="true" />}</div>;
     })}
   </div>;
 }

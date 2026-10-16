@@ -51,7 +51,7 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   if (options.csrf !== false && options.method && !['GET', 'HEAD'].includes(options.method)) {
     if (csrfToken) headers.set('x-csrf-token', csrfToken);
   }
-  const response = await fetch(`/api/admin${path}`, { ...options, headers, credentials: 'same-origin' });
+  const response = await fetch(`/api/admin${path}`, { ...options, cache: 'no-store', headers, credentials: 'same-origin' });
   const body = await response.json().catch(() => ({})) as T & { error?: string; code?: string; csrfToken?: string };
   if (!response.ok) throw new AdminApiError(body.error || `请求失败（${response.status}）`, body.code);
   if (body.csrfToken) csrfToken = body.csrfToken;

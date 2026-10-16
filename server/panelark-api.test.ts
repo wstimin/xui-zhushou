@@ -113,6 +113,16 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(changedLink) })).status, 200);
     assert.equal((await buy()).headers.get("location"), changedLink.purchaseUrl);
     const freshConfig = await fetch(`${base}/public/config`); assert.equal(freshConfig.headers.get("cache-control"), "no-store"); assert.equal((await json(freshConfig)).purchaseUrl, changedLink.purchaseUrl);
+    const supportOnlyChange = { ...changedLink, supportUrl: "https://support.example/contact" };
+    const supportSavedResponse = await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify(supportOnlyChange) });
+    assert.equal(supportSavedResponse.headers.get("cache-control"), "no-store");
+    const supportSaved = await json(supportSavedResponse);
+    assert.equal(supportSaved.supportUrl, supportOnlyChange.supportUrl);
+    assert.equal(supportSaved.purchaseUrl, changedLink.purchaseUrl);
+    assert.equal((await buy()).headers.get("location"), changedLink.purchaseUrl, "customer support changes must not replace the purchase destination");
+    const savedSettingsResponse = await fetch(`${base}/admin/settings`, { headers: adminHeaders });
+    assert.equal(savedSettingsResponse.headers.get("cache-control"), "no-store");
+    assert.equal((await json(savedSettingsResponse)).supportUrl, supportOnlyChange.supportUrl);
     assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...changedLink, purchaseEnabled: false }) })).status, 200);
     const closed = await buy(); assert.equal(closed.status, 404); assert.equal(closed.headers.get("location"), null);
     assert.equal((await fetch(`${base}/admin/settings`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ ...changedLink, purchaseUrl: "https://user:pass@shop.example/" }) })).status, 400);

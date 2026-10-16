@@ -652,7 +652,7 @@ export async function mountPanelArkApi(app: Express) {
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/settings", requirePermission("settings:read"), (_req, res) => res.json({ success: true, ...getAdminSettings(db) }));
+  router.get("/admin/settings", requirePermission("settings:read"), (_req, res) => res.set("Cache-Control", "no-store").json({ success: true, ...getAdminSettings(db) }));
 
   router.put("/admin/settings", requirePermission("settings:write"), (req: AuthenticatedRequest, res) => {
     try {
@@ -679,7 +679,7 @@ export async function mountPanelArkApi(app: Express) {
         for (const [key, value] of Object.entries(updates)) db.run("INSERT OR REPLACE INTO site_settings(key, value, updated_at) VALUES (?, ?, ?)", [key, value, now()]);
       });
       audit(db, req, "settings.update", "site_settings", undefined, { purchaseEnabled: bool(req.body?.purchaseEnabled), adminPathChanged: adminPath !== previousAdminPath }, req.panelarkAdmin!.id);
-      res.json({ success: true, ...getAdminSettings(db) });
+      res.set("Cache-Control", "no-store").json({ success: true, ...getAdminSettings(db) });
     } catch (error) { sendError(res, error); }
   });
 

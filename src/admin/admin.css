@@ -73,6 +73,7 @@
 .admin-switch input:disabled+i{opacity:.5;cursor:not-allowed}
 .admin-settings-help{padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:var(--bg-primary);color:var(--text-secondary);font-size:13px}
 .admin-settings-help p{margin:0 0 6px}
+.admin-settings-help strong{font-weight:600;color:var(--text-primary);overflow-wrap:anywhere}
 .admin-settings-help a{color:var(--accent-hover);text-underline-offset:3px;font-weight:600}
 .admin-readonly,.admin-warning,.admin-inline-notice{font-size:13px;line-height:1.8;overflow-wrap:anywhere}
 .admin-warning{padding:14px}

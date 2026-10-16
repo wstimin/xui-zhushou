@@ -11,6 +11,7 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
   const originalFetch = globalThis.fetch;
   const requests: { path: string; method: string; body: unknown }[] = [];
   let phase = 'idle';
+  let savedSettings = { purchaseEnabled: true, purchaseButtonText: '购买 CDK', purchaseUrl: 'https://old-shop.example/cdk', supportUrl: 'https://support.example/', siteNotice: '', adminPath: '/admin' };
   const state = () => ({ phase, progress: 0, currentVersion: '2.2.3', channel: 'stable', targetVersion: '99.0.0', message: '测试版本信息', updatedAt: new Date().toISOString(), events: [] });
   const identity = { id: 'owner', username: 'owner', role: 'super_admin' };
   const { createRoot } = await import('react-dom/client');
@@ -25,6 +26,11 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     if (path === '/bootstrap') result = { required: false };
     else if (path === '/session') result = { admin: identity };
     else if (path === '/dashboard') result = { stats: {} };
+    else if (path === '/settings') {
+      assert.equal(options?.cache, 'no-store');
+      if (method === 'PUT') savedSettings = JSON.parse(String(options.body));
+      result = savedSettings;
+    }
     else if (path === '/update/status') result = { state: state(), signingConfigured: true, applicationUpdateSupported: true, adapterCatalogVersion: '2.2.3' };
     else if (path === '/security/report') result = { report: { failed: 0, warnings: 0, checks: [] } };
     else if (path === '/update/check') { phase = 'available'; result = { state: state() }; }
@@ -81,6 +87,23 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     await click('确认应用更新'); await click('取消', dialog()); assert.equal(updates().length, 1);
     await click('确认应用更新'); await click('确认', dialog()); assert.equal(updates().length, 2); await dismiss();
     await click('浅色模式'); assert.equal(document.documentElement.dataset.theme, 'light');
+    await click('站点配置');
+    const fillSetting = async (label: string, value: string) => {
+      const field = [...document.querySelectorAll('label')].find(node => node.querySelector('span')?.textContent === label)?.querySelector('input');
+      assert.ok(field, label);
+      await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+    };
+    await fillSetting('客服链接（HTTPS，不影响购买 CDK 跳转）', 'https://new-support.example/');
+    assert.equal(document.querySelector('[data-saved-purchase]')?.textContent, 'https://old-shop.example/cdk');
+    await click('保存配置');
+    assert.match(dialog().textContent!, /购买 CDK 跳转：https:\/\/old-shop.example\/cdk/);
+    assert.match(dialog().textContent!, /客服链接：https:\/\/new-support.example\//); await dismiss();
+    await fillSetting('购买 CDK 的跳转链接（HTTPS）', 'https://new-shop.example/cdk');
+    assert.equal(document.querySelector('[data-saved-purchase]')?.textContent, 'https://old-shop.example/cdk');
+    assert.match(document.querySelector('[role="status"]')!.textContent!, /购买链接有未保存修改/);
+    await click('保存配置'); assert.match(dialog().textContent!, /购买 CDK 跳转：https:\/\/new-shop.example\/cdk/); await dismiss();
+    assert.equal(document.querySelector('[data-saved-purchase]')?.textContent, 'https://new-shop.example/cdk');
+    assert.equal(document.querySelector('[data-saved-support]')?.textContent, 'https://new-support.example/');
     assert.equal(document.body.style.overflow, ''); assert.equal(Boolean(document.getElementById('root')!.inert), false);
   } finally {
     await act(async () => { root.unmount(); }); globalThis.fetch = originalFetch; dom.window.close();

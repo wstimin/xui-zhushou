@@ -8,8 +8,28 @@ import { PurchaseLink } from '../src/panelark/PurchaseLink.js';
 import { CatalogPage, CdkGateModal, Header, HomePage } from '../src/panelark/ui.js';
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
+import { JSDOM } from 'jsdom';
 
 const noop = () => {};
+test('CDK step frame keeps symmetric inner padding without changing the original font size', () => {
+  const html = renderToStaticMarkup(<CdkGateModal purchaseEnabled purchaseButtonText="购买 CDK" onClose={noop} onVerified={noop} />);
+  const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+  const flowCss = css.slice(css.indexOf('.deployment-flow{'), css.indexOf('.catalog-grid{'));
+  const dom = new JSDOM(`<style>${flowCss}</style>${html}`);
+  try {
+    const flow = dom.window.document.querySelector<HTMLElement>('.license-body .deployment-flow.compact')!;
+    const style = dom.window.getComputedStyle(flow);
+    assert.equal(style.paddingTop, '14px'); assert.equal(style.paddingBottom, '14px');
+    assert.equal(style.paddingLeft, '16px'); assert.equal(style.paddingRight, '16px');
+    assert.equal(style.borderRadius, '15px');
+    const first = flow.firstElementChild!;
+    assert.equal(dom.window.getComputedStyle(first).alignItems, 'center');
+    assert.equal(dom.window.getComputedStyle(first).fontSize, '10px');
+    assert.equal(first.getAttribute('aria-current'), 'step');
+    assert.notEqual(dom.window.getComputedStyle(first.querySelector('i')!).position, 'absolute');
+    assert.doesNotMatch(flowCss, /padding:0 0 16px/);
+  } finally { dom.window.close(); }
+});
 test('batch package choices include every page, not only the first 100 packages', async () => {
   const original = globalThis.fetch;
   const pages: number[] = [];

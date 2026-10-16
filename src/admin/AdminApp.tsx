@@ -219,11 +219,12 @@ function CdkPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Not
 function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Notice) => void }) {
   const editable = admin.role !== 'support';
   const [form, setForm] = useState<AdminSettings>(emptySettings);
+  const [saved, setSaved] = useState<AdminSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let active = true;
-    adminApi.settings().then(({ success: _success, ...settings }) => { if (active) { setForm(settings); setLoading(false); } }).catch(error => { if (active) notify({ kind: 'error', text: message(error) }); });
+    adminApi.settings().then(({ success: _success, ...settings }) => { if (active) { setForm(settings); setSaved(settings); setLoading(false); } }).catch(error => { if (active) notify({ kind: 'error', text: message(error) }); });
     return () => { active = false; };
   }, [notify]);
   const submit = async (event: FormEvent) => {
@@ -231,22 +232,25 @@ function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice
     try {
       const { success: _success, ...settings } = await adminApi.updateSettings(form);
       setForm(settings);
+      setSaved(settings);
       try { window.localStorage.setItem('panelark-settings-changed', String(Date.now())); } catch { /* focus refresh remains available */ }
       const currentPath = window.location.pathname.replace(/\/+$/g, '') || '/';
       if (currentPath !== settings.adminPath && !currentPath.startsWith(`${settings.adminPath}/`)) {
         window.location.assign(settings.adminPath);
         return;
       }
-      notify({ kind: 'success', text: '配置已保存，购买跳转立即生效，用户端自动同步' });
+      notify({ kind: 'success', text: `配置已保存。\n购买 CDK 跳转：${settings.purchaseEnabled ? settings.purchaseUrl || '未设置' : '已关闭购买入口'}\n客服链接：${settings.supportUrl || '未设置'}\n购买与客服是两个独立配置，修改客服链接不会改变购买跳转。` });
     }
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
   return <><PageHeading kicker="Site configuration" title="站点配置" description="管理访问入口、CDK 购买渠道和站点公告。保存后购买跳转立即生效。" /><form noValidate className="admin-panel admin-settings-form" onSubmit={submit}>
     <fieldset disabled={loading || busy} className="admin-settings-section"><legend>访问入口</legend><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><p className="admin-readonly">修改后会跳转到新后台地址，请保存此地址。</p></fieldset>
-    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>CDK 购买与客服</legend>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>购买 CDK 跳转</legend>
     <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>在导航、面板目录和授权弹窗中显示购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
-    <div className="admin-form-grid"><AdminInput label="购买按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} /><AdminInput label="购买链接（HTTPS）" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} /><AdminInput label="客服链接（HTTPS）" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /></div>
-    <div className="admin-settings-help"><p>先点击“保存配置”，再测试。购买入口每次跳转都读取服务器上最新保存的链接，不使用旧页面缓存。</p><a href="/api/public/purchase" target="_blank" rel="noopener noreferrer">测试已保存的购买链接 ↗</a></div></fieldset>
+    <AdminInput label="购买按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} />
+    <AdminInput label="购买 CDK 的跳转链接（HTTPS）" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} />
+    <div className="admin-settings-help"><p>“购买 CDK”按钮只使用这里的购买链接，不使用下面的客服链接。修改后请点击“保存配置”。</p><p>已保存的购买地址：<strong data-saved-purchase>{loading ? '正在读取…' : saved?.purchaseUrl || '未设置'}</strong></p>{saved && form.purchaseUrl !== saved.purchaseUrl && <p role="status">购买链接有未保存修改，当前跳转仍使用上方已保存地址。</p>}{saved?.purchaseEnabled && saved.purchaseUrl && <a href="/api/public/purchase" target="_blank" rel="noopener noreferrer">测试已保存的购买跳转 ↗</a>}</div></fieldset>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>客服链接（独立配置）</legend><AdminInput label="客服链接（HTTPS，不影响购买 CDK 跳转）" type="url" value={form.supportUrl} setValue={supportUrl => setForm({ ...form, supportUrl })} placeholder="https://support.example.com" disabled={!editable} /><div className="admin-settings-help"><p>客服地址不会替代购买地址。要更换“购买 CDK”跳转，请修改上面的购买链接。</p><p>已保存的客服地址：<strong data-saved-support>{loading ? '正在读取…' : saved?.supportUrl || '未设置'}</strong></p></div></fieldset>
     <fieldset disabled={loading || busy} className="admin-settings-section"><legend>站点公告</legend><AdminInput label="全站公告" value={form.siteNotice} setValue={siteNotice => setForm({ ...form, siteNotice })} disabled={!editable} /></fieldset>
     {editable ? <button className="admin-primary" disabled={busy || loading}>{loading ? '正在读取配置…' : busy ? '正在保存…' : '保存配置'}</button> : <p className="admin-readonly">当前角色只有查看权限。</p>}
   </form></>;
