@@ -49,7 +49,7 @@
 | `PANELARK_SETUP_TOKEN` | 仅面板/容器部署的首次安装令牌；一键脚本不使用 |
 | `PANELARK_TRUST_PROXY` | 面板代理可设 `true`；只允许受信任代理访问后端端口，代理须正确传递 `X-Forwarded-Proto` |
 | `PANELARK_DEPLOYMENT_MODE` | 一键脚本使用 `standalone`；`panel:start` 使用 `panel`，镜像使用 `docker`，后两者启用网页向导并由面板/容器负责更新 |
-| `PANELARK_BACKUP_PASSPHRASE` | 可选，启用定时加密备份时设置，至少 12 位；务必另行保管 |
+| `PANELARK_BACKUP_PASSPHRASE` | 可选，启用定时加密备份时设置，至少 6 位并建议更长；务必另行保管 |
 
 推荐让证书在面板反向代理处终止，后端使用 HTTP。该方式不需要向 Node 项目传入 `SSL_CERT` / `SSL_KEY`。完整变量示例见 [`.env.example`](../../.env.example)。
 

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { PanelArkDatabase } from "./panelark-db.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
 import { canonicalManifest, compareVersions, PanelArkUpdateManager, ReleaseManifest, validateAdapterCatalog, validateReleaseManifest } from "./panelark-update.js";
@@ -80,5 +80,26 @@ test("detecting a newer signed release only reads metadata; no backup, package d
     fs.writeFileSync(stateFile, JSON.stringify(applying));
     await assert.rejects(manager.check("stable"), /正在进行/);
     assert.equal(manager.status().phase, "applying"); assert.equal(requests.length, 2);
+  } finally { globalThis.fetch = previousFetch; db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("preparing an update creates a managed backup without a user password", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-update-prepare-"));
+  fs.writeFileSync(path.join(directory, "panelark.secret"), Buffer.alloc(32, 6));
+  const db = await PanelArkDatabase.open(path.join(directory, "panelark.sqlite"));
+  const previousFetch = globalThis.fetch;
+  const archive = Buffer.from("signed-release-archive");
+  const { manifest, publicKey } = signedManifest("99.0.0");
+  manifest.sha256 = createHash("sha256").update(archive).digest("hex");
+  const state = { phase: "available", progress: 15, currentVersion: "2.2.7", targetVersion: manifest.version, channel: "stable", message: "available", updatedAt: new Date().toISOString(), manifest, events: [] };
+  fs.writeFileSync(path.join(directory, "update-state.json"), JSON.stringify(state));
+  try {
+    globalThis.fetch = async () => new Response(archive, { headers: { "content-length": String(archive.length) } });
+    const prepared = await new PanelArkUpdateManager(db, directory, publicKey).prepare("admin");
+    assert.equal(prepared.phase, "prepared"); assert.equal(prepared.progress, 50);
+    assert.ok(fs.existsSync(String(prepared.archivePath)));
+    assert.ok(fs.existsSync(path.join(directory, "backup-managed.key")));
+    const backup = db.get<{ reason: string; filename: string }>("SELECT reason, filename FROM backup_records ORDER BY created_at DESC LIMIT 1");
+    assert.equal(backup?.reason, "managed_pre_update"); assert.equal(backup?.filename, prepared.preUpdateBackup);
   } finally { globalThis.fetch = previousFetch; db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });

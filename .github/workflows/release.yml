@@ -57,6 +57,9 @@ jobs:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
         run: node scripts/sign-release.mjs --public-only
 
+      - name: Bundle production dependencies for fast offline updates
+        run: npm ci --prefix release/package --omit=dev --ignore-scripts
+
       - name: Read release version
         id: release
         shell: bash
@@ -125,6 +128,8 @@ jobs:
           test -s release/package/install.sh
           test -s release/package/package-lock.json
           test -s release/package/release-public-key.pem
+          test -s release/package/node_modules/express/package.json
+          test -s release/package/node_modules/sql.js/dist/sql-wasm.wasm
           test -s release/package/scripts/apply-update.mjs
           test -s release/package/panel.cjs
           test -s release/package/scripts/panel-start.mjs
@@ -147,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Signed online update|Pre-update encrypted backup|Automatic health-check rollback"
+          PANELARK_RELEASE_NOTES: "One-confirmation online update|Passwordless managed pre-update snapshot|Bundled production dependencies|Automatic health-check rollback"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

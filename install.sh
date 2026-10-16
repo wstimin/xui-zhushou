@@ -625,11 +625,15 @@ install_assistant() {
 
   echo -e "${BLUE}[4/5] 安装生产运行依赖并切换到新构建包...${NC}"
   cd "$DOWNLOADED_PACKAGE_DIR"
-  if ! npm ci --omit=dev --ignore-scripts; then
-    rm -rf "$DOWNLOADED_WORK_DIR"
-    echo -e "${RED}[ERROR] 生产运行依赖安装失败，旧版本未被替换。${NC}"
-    pause_if_tty
-    return 1
+  if [ -f node_modules/express/package.json ] && [ -f node_modules/sql.js/dist/sql-wasm.wasm ]; then
+    echo -e "${GREEN}[OK] 发布包已内置锁定的生产运行依赖，无需重复下载。${NC}"
+  else
+    if ! npm ci --omit=dev --ignore-scripts; then
+      rm -rf "$DOWNLOADED_WORK_DIR"
+      echo -e "${RED}[ERROR] 生产运行依赖安装失败，旧版本未被替换。${NC}"
+      pause_if_tty
+      return 1
+    fi
   fi
 
   if ! command -v pm2 &> /dev/null; then

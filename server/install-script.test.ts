@@ -10,6 +10,8 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 
 const installer = readFileSync(new URL("../install.sh", import.meta.url), "utf8");
+const updateRunner = readFileSync(new URL("../scripts/apply-update.mjs", import.meta.url), "utf8");
+const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
 test("PM2 reads the release version instead of inheriting a previous updater version", () => {
   const previous = process.env.APP_VERSION;
@@ -41,6 +43,16 @@ test("one-click installer fails closed when runtime setup or production dependen
   assert.match(installer, /if ! env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a bash "\$setup_script"/);
   assert.match(installer, /if ! npm ci --omit=dev --ignore-scripts/);
   assert.match(installer, /旧版本未被替换/);
+});
+
+test("release packages bundle production dependencies and installers avoid downloading them twice", () => {
+  assert.match(releaseWorkflow, /npm ci --prefix release\/package --omit=dev --ignore-scripts/);
+  assert.match(releaseWorkflow, /release\/package\/node_modules\/express\/package\.json/);
+  assert.match(installer, /node_modules\/express\/package\.json/);
+  assert.match(installer, /无需重复下载/);
+  assert.match(updateRunner, /const bundledDependencies =/);
+  assert.match(updateRunner, /if \(!bundledDependencies\) run\("npm"/);
+  assert.match(updateRunner, /timeout = 5 \* 60_000/);
 });
 
 // These run real Bash functions (including generated shortcuts), not text-only assertions.

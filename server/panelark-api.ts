@@ -9,7 +9,7 @@ import { mountPanelArkRemoteApi } from "./panelark-remote.js";
 import { attachJobSse, PanelArkJobEngine } from "./panelark-jobs.js";
 import { getPanelAdapter, getPanelAdapterSteps, listPanelAdapters, PanelAdapterOperation } from "./panel-adapters.js";
 import { registerCatalogAdapters } from "./catalog-adapters.js";
-import { backupFilePath, backupLimits, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup } from "./panelark-backup.js";
+import { backupFilePath, backupLimits, backupPassphraseForRecord, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup, saveManagedBackup } from "./panelark-backup.js";
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
 import { normalizeAdminPath, readAdminPath } from "./admin-path.js";
@@ -915,7 +915,7 @@ export async function mountPanelArkApi(app: Express) {
 
   router.post("/admin/update/prepare", requirePermission("*"), async (req: AuthenticatedRequest, res) => {
     try {
-      const state = await updateManager.prepare(String(req.body?.passphrase || ""), req.panelarkAdmin!.id);
+      const state = await updateManager.prepare(req.panelarkAdmin!.id);
       audit(db, req, "update.prepare", "system", undefined, { targetVersion: state.targetVersion, preUpdateBackup: state.preUpdateBackup }, req.panelarkAdmin!.id);
       res.json({ success: true, state });
     } catch (error) { sendError(res, error); }
@@ -985,24 +985,28 @@ export async function mountPanelArkApi(app: Express) {
 
   router.post("/admin/backups/:id/preview", requirePermission("*"), (req, res) => {
     try {
-      const record = db.get<DbRow>("SELECT filename FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
+      const record = db.get<DbRow>("SELECT filename, reason FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
       if (!record) throw new Error("备份不存在");
-      const preview = backupPreview(fs.readFileSync(backupFilePath(dataDirectory, String(record.filename))), String(req.body?.passphrase || ""));
+      const passphrase = backupPassphraseForRecord(dataDirectory, record.reason, req.body?.passphrase);
+      const preview = backupPreview(fs.readFileSync(backupFilePath(dataDirectory, String(record.filename))), passphrase);
       res.json({ success: true, preview });
     } catch (error) { sendError(res, error); }
   });
 
   router.post("/admin/backups/:id/restore", requirePermission("*"), (req: AuthenticatedRequest, res) => {
-    const passphrase = String(req.body?.passphrase || "");
     const secretPath = path.join(dataDirectory, "panelark.secret");
     const previousDatabase = db.exportBytes();
     const previousSecret = fs.readFileSync(secretPath);
     try {
-      const record = db.get<DbRow>("SELECT filename FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
+      const record = db.get<DbRow>("SELECT filename, reason FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
       if (!record) throw new Error("备份不存在");
+      const managed = ["managed_pre_update", "managed_pre_restore"].includes(String(record.reason));
+      const passphrase = backupPassphraseForRecord(dataDirectory, record.reason, req.body?.passphrase);
       const archive = fs.readFileSync(backupFilePath(dataDirectory, String(record.filename)));
       const payload = decryptBackup(archive, passphrase);
-      const snapshot = saveBackup(db, dataDirectory, passphrase, "pre_restore", req.panelarkAdmin!.id);
+      const snapshot = managed
+        ? saveManagedBackup(db, dataDirectory, "managed_pre_restore", req.panelarkAdmin!.id)
+        : saveBackup(db, dataDirectory, passphrase, "pre_restore", req.panelarkAdmin!.id);
       const restoredSecret = Buffer.from(payload.cdkPepper, "base64");
       if (restoredSecret.length < 16) throw new Error("备份中的 CDK 密钥无效");
       db.replaceFromBytes(Buffer.from(payload.database, "base64"));

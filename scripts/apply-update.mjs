@@ -38,8 +38,8 @@ function writeState(patch) {
   return next;
 }
 
-function run(command, args, cwd, environment = {}) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: 10 * 60_000, env: { ...process.env, ...environment } });
+function run(command, args, cwd, environment = {}, timeout = 5 * 60_000) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout, env: { ...process.env, ...environment } });
   if (result.error || result.status !== 0) throw new Error(`${command} 执行失败：${result.error?.message || result.stderr || result.stdout || result.status}`.slice(0, 2000));
   return result.stdout;
 }
@@ -94,15 +94,17 @@ try {
   const updateRoot = path.resolve(path.join(dataDirectory, "updates"));
   if (!archive.startsWith(`${updateRoot}${path.sep}`) || !fs.existsSync(archive)) throw new Error("更新包路径无效或文件不存在");
   writeState({ phase: "applying", progress: 60, message: "正在校验更新包目录结构" });
-  const entries = run("tar", ["-tzf", archive], targetParent).split(/\r?\n/).filter(Boolean);
+  const entries = run("tar", ["-tzf", archive], targetParent, {}, 60_000).split(/\r?\n/).filter(Boolean);
   if (!entries.length || entries.some(entry => path.isAbsolute(entry) || entry.split(/[\\/]/).includes(".."))) throw new Error("更新包包含不安全路径");
   fs.rmSync(candidate, { recursive: true, force: true });
   fs.mkdirSync(candidate, { recursive: true });
-  run("tar", ["-xzf", archive, "-C", candidate], targetParent);
+  run("tar", ["-xzf", archive, "-C", candidate], targetParent, {}, 60_000);
   const version = fs.readFileSync(path.join(candidate, "VERSION"), "utf8").trim();
   if (version !== state.targetVersion || !fs.existsSync(path.join(candidate, "dist", "server.cjs")) || !fs.existsSync(path.join(candidate, "scripts", "apply-update.mjs"))) throw new Error("更新包版本或结构与签名清单不一致");
-  writeState({ phase: "applying", progress: 68, message: "正在安装锁定的生产依赖" });
-  run("npm", ["ci", "--omit=dev", "--ignore-scripts"], candidate);
+  const bundledDependencies = fs.existsSync(path.join(candidate, "node_modules", "express", "package.json"))
+    && fs.existsSync(path.join(candidate, "node_modules", "sql.js", "dist", "sql-wasm.wasm"));
+  writeState({ phase: "applying", progress: 68, message: bundledDependencies ? "正在验证构建包内置运行依赖" : "构建包未内置运行依赖，正在限时补齐" });
+  if (!bundledDependencies) run("npm", ["ci", "--omit=dev", "--ignore-scripts"], candidate);
   if (fs.existsSync(path.join(target, ".env"))) fs.copyFileSync(path.join(target, ".env"), path.join(candidate, ".env"));
   const env = parseEnv(path.join(candidate, ".env"));
   writeState({ phase: "applying", progress: 78, message: "正在原子切换到新版本" });

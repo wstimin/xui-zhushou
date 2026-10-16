@@ -6,8 +6,9 @@ import { PanelArkDatabase } from "./panelark-db.js";
 
 const MAGIC = Buffer.from("PGBK0001", "ascii");
 const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
+const MANAGED_BACKUP_KEY = "backup-managed.key";
 
-type BackupReason = "manual" | "scheduled" | "pre_update" | "pre_restore" | "uploaded";
+type BackupReason = "manual" | "scheduled" | "pre_update" | "managed_pre_update" | "pre_restore" | "managed_pre_restore" | "uploaded";
 
 export type BackupPayload = {
   format: 1;
@@ -20,8 +21,29 @@ export type BackupPayload = {
 
 function validatePassphrase(passphrase: unknown) {
   const value = String(passphrase || "");
-  if (value.length < 12 || value.length > 256) throw new Error("备份密码需为 12 至 256 位");
+  if (value.length < 6 || value.length > 256) throw new Error("备份密码需为 6 至 256 位");
   return value;
+}
+
+export function managedBackupPassphrase(dataDirectory: string) {
+  const keyPath = path.join(dataDirectory, MANAGED_BACKUP_KEY);
+  if (fs.existsSync(keyPath)) {
+    const existing = fs.readFileSync(keyPath, "utf8").trim();
+    if (existing.length < 32) throw new Error("系统托管备份密钥无效，请检查数据目录权限");
+    return existing;
+  }
+  fs.mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+  const value = randomBytes(32).toString("base64url");
+  const temporary = `${keyPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${value}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, keyPath);
+  return value;
+}
+
+export function backupPassphraseForRecord(dataDirectory: string, reason: unknown, supplied: unknown) {
+  return ["managed_pre_update", "managed_pre_restore"].includes(String(reason))
+    ? managedBackupPassphrase(dataDirectory)
+    : String(supplied || "");
 }
 
 export function encryptBackup(payload: BackupPayload, passphrase: string) {
@@ -100,6 +122,10 @@ export function saveBackup(db: PanelArkDatabase, dataDirectory: string, passphra
     [id, filename, reason, archive.length, createdBy || null, new Date().toISOString()],
   );
   return { id, filename, reason, sizeBytes: archive.length, archive };
+}
+
+export function saveManagedBackup(db: PanelArkDatabase, dataDirectory: string, reason: "managed_pre_update" | "managed_pre_restore", createdBy?: string) {
+  return saveBackup(db, dataDirectory, managedBackupPassphrase(dataDirectory), reason, createdBy);
 }
 
 export function backupFilePath(dataDirectory: string, filename: string) {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, verify } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { saveBackup } from "./panelark-backup.js";
+import { saveManagedBackup } from "./panelark-backup.js";
 import { PanelArkDatabase } from "./panelark-db.js";
 import { applicationUpdatePolicy } from "./setup.js";
 
@@ -123,7 +123,22 @@ export class PanelArkUpdateManager {
 
   status(): UpdateState {
     if (fs.existsSync(this.statePath)) {
-      try { return JSON.parse(fs.readFileSync(this.statePath, "utf8")) as UpdateState; } catch { /* reset corrupt state */ }
+      try {
+        const state = JSON.parse(fs.readFileSync(this.statePath, "utf8")) as UpdateState;
+        const actualVersion = currentVersion();
+        if (state.currentVersion !== actualVersion) {
+          const reachedTarget = state.targetVersion === actualVersion;
+          return {
+            ...state,
+            currentVersion: actualVersion,
+            ...(reachedTarget ? { phase: "completed" as const, progress: 100, message: `已更新至 v${actualVersion}`, error: undefined } : {}),
+          };
+        }
+        if (["applying", "restarting"].includes(state.phase) && Date.now() - new Date(state.updatedAt).getTime() > 12 * 60_000) {
+          return { ...state, message: "更新进度长时间未变化，请刷新状态；当前服务仍可访问时可使用 pa update 完成升级", error: "独立更新进程超过 12 分钟未报告新进度，系统不会自动重复执行更新" };
+        }
+        return state;
+      } catch { /* reset corrupt state */ }
     }
     const version = currentVersion();
     return { phase: "idle", progress: 0, currentVersion: version, channel: "stable", message: "尚未检查更新", updatedAt: now(), events: [] };
@@ -168,13 +183,13 @@ export class PanelArkUpdateManager {
     }
   }
 
-  async prepare(passphrase: string, adminId: string) {
+  async prepare(adminId: string) {
     if (!applicationUpdatePolicy().applicationUpdateSupported) throw new Error(applicationUpdatePolicy().applicationUpdateHint);
     const state = this.status();
     if (state.phase !== "available" || !state.manifest) throw new Error("请先检查并确认存在可用更新");
     this.write({ phase: "downloading", progress: 25, message: "正在创建更新前加密备份" });
     try {
-      const backup = saveBackup(this.db, this.dataDirectory, passphrase, "pre_update", adminId);
+      const backup = saveManagedBackup(this.db, this.dataDirectory, "managed_pre_update", adminId);
       this.write({ phase: "downloading", progress: 35, preUpdateBackup: backup.filename, message: "更新前备份完成，正在下载签名更新包" });
       const response = await fetch(state.manifest.packageUrl, { signal: AbortSignal.timeout(120_000), headers: { accept: "application/gzip, application/octet-stream" } });
       if (!response.ok) throw new Error(`更新包下载失败（HTTP ${response.status}）`);

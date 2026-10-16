@@ -11,7 +11,7 @@ export function buildSecurityReport(db: PanelArkDatabase, dataDirectory: string,
   checks.push({ id: "https", label: "HTTPS 传输", status: !production || httpsConfigured ? "pass" : "fail", detail: !production ? "开发环境" : httpsConfigured ? "已配置证书或可信反向代理" : "生产环境未配置 HTTPS" });
   checks.push({ id: "https-enforcement", label: "HTTPS 强制", status: !production || process.env.PANELARK_REQUIRE_HTTPS === "true" ? "pass" : "warning", detail: process.env.PANELARK_REQUIRE_HTTPS === "true" ? "已拒绝明文生产请求" : "建议启用 PANELARK_REQUIRE_HTTPS" });
   checks.push({ id: "updates", label: "更新签名", status: signingConfigured ? "pass" : "fail", detail: signingConfigured ? "已加载 Ed25519 发布公钥" : "在线更新已安全禁用" });
-  checks.push({ id: "backups", label: "定时备份密钥", status: process.env.PANELARK_BACKUP_PASSPHRASE ? "pass" : "warning", detail: process.env.PANELARK_BACKUP_PASSPHRASE ? "可执行加密定时备份" : "仅可手动输入备份密码" });
+  checks.push({ id: "backups", label: "定时备份密钥", status: process.env.PANELARK_BACKUP_PASSPHRASE ? "pass" : "warning", detail: process.env.PANELARK_BACKUP_PASSPHRASE ? "可执行加密定时备份" : "更新快照可自动托管；定时备份仍需环境密钥" });
   const secretPath = path.join(dataDirectory, "panelark.secret");
   const secretValid = fs.existsSync(secretPath) && fs.statSync(secretPath).size >= 32;
   checks.push({ id: "cdk-secret", label: "CDK 密钥", status: secretValid ? "pass" : "fail", detail: secretValid ? "独立密钥文件存在且长度有效" : "CDK 密钥缺失或过短" });

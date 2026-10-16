@@ -223,6 +223,22 @@ const MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS idx_reviews_status ON job_reviews(status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_backups_created ON backup_records(created_at DESC);
   `,
+  `
+    CREATE TABLE backup_records_next (
+      id TEXT PRIMARY KEY,
+      filename TEXT NOT NULL UNIQUE,
+      reason TEXT NOT NULL CHECK(reason IN ('manual','scheduled','pre_update','managed_pre_update','pre_restore','managed_pre_restore','uploaded')),
+      size_bytes INTEGER NOT NULL,
+      created_by TEXT REFERENCES admins(id),
+      created_at TEXT NOT NULL
+    );
+
+    INSERT INTO backup_records_next(id, filename, reason, size_bytes, created_by, created_at)
+      SELECT id, filename, reason, size_bytes, created_by, created_at FROM backup_records;
+    DROP TABLE backup_records;
+    ALTER TABLE backup_records_next RENAME TO backup_records;
+    CREATE INDEX idx_backups_created ON backup_records(created_at DESC);
+  `,
 ];
 
 export class PanelArkDatabase {

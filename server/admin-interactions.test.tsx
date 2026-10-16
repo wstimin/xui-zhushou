@@ -79,13 +79,9 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     assert.equal(requests.filter(item => item.path === '/backups' && item.method === 'POST').length, 0);
     await click('系统更新'); await click('检测更新');
     assert.match(dialog().textContent!, /检测不会下载或安装/); assert.equal(updates().length, 0); await dismiss();
-    await click('手动更新：备份并下载'); await click('取消', dialog()); assert.equal(updates().length, 0);
-    await click('手动更新：备份并下载'); await click('确认', dialog()); assert.match(dialog().textContent!, /至少输入 12 位/); assert.equal(updates().length, 0);
-    const input = dialog().querySelector('input')!;
-    await act(async () => { Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'test-backup-passphrase'); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
-    await click('确认', dialog()); assert.equal(updates().length, 1); await dismiss();
-    await click('确认应用更新'); await click('取消', dialog()); assert.equal(updates().length, 1);
-    await click('确认应用更新'); await click('确认', dialog()); assert.equal(updates().length, 2); await dismiss();
+    await click('下载并安装更新'); assert.equal(dialog().querySelector('input'), null); await click('取消', dialog()); assert.equal(updates().length, 0);
+    await click('下载并安装更新'); assert.equal(dialog().querySelector('input'), null); await click('确认', dialog());
+    assert.deepEqual(updates().map(item => item.path), ['/update/prepare', '/update/apply']); await dismiss();
     await click('浅色模式'); assert.equal(document.documentElement.dataset.theme, 'light');
     await click('站点配置');
     const fillSetting = async (label: string, value: string) => {
