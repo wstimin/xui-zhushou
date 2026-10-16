@@ -32,7 +32,9 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
   try {
     assert.equal(Number(services.db.get<{ total: number }>("SELECT COUNT(*) AS total FROM cdks")?.total || 0), 0);
     const adapters = await json(await fetch(`${base}/adapters`));
-    assert.ok(adapters.items.length >= 16);
+    assert.equal(adapters.items.length, 21);
+    for (const id of ['1panel', 'aapanel', 'bt-panel']) assert.equal(adapters.items.find((item: { id: string }) => item.id === id)?.category, '建站面板');
+    for (const id of ['new-api', 'one-api', 'cliproxyapi']) assert.equal(adapters.items.find((item: { id: string }) => item.id === id)?.category, 'AI 面板');
     assert.ok(adapters.items.some((item: { id: string; capabilities: string[] }) => item.id === "3x-ui" && item.capabilities.includes("reality")));
     assert.ok(adapters.items.some((item: { id: string; kind: string }) => item.id === "docker" && item.kind === "tool"));
     const bootstrapState = await json(await fetch(`${base}/admin/bootstrap`));

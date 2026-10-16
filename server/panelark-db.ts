@@ -239,6 +239,12 @@ const MIGRATIONS = [
     ALTER TABLE backup_records_next RENAME TO backup_records;
     CREATE INDEX idx_backups_created ON backup_records(created_at DESC);
   `,
+  `
+    UPDATE catalog_overrides SET category = '建站面板'
+      WHERE adapter_id = '1panel' AND category = '服务器面板';
+    UPDATE cdk_packages SET allowed_category = '建站面板'
+      WHERE allowed_category = '服务器面板';
+  `,
 ];
 
 export class PanelArkDatabase {

@@ -109,3 +109,4 @@ button,input,textarea{color:inherit;font:inherit} button{border:0;cursor:pointer
 @media(max-width:1150px) and (min-width:801px){.catalog-access-actions{flex-direction:column;align-items:stretch;min-width:280px}.catalog-access-actions .purchase-button{align-self:flex-end}}
 @media(max-width:800px){.catalog-access-actions{justify-content:flex-start}.catalog-access-actions .connection-card{min-width:0;flex-basis:280px}}
 @media(max-width:560px){.nav-wrap{gap:8px}.nav-actions{gap:6px}.nav-actions .access-pill{display:none}.header-purchase{max-width:116px;font-size:12px;padding:8px 9px;gap:5px}.header-purchase svg:last-child{display:none}.catalog-access-actions{gap:10px}.catalog-access-actions .connection-card{flex-basis:100%}.license-actions .purchase-button{justify-content:center}}
+.result-row-wrap>strong{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}

@@ -1,6 +1,6 @@
 # PanelArk
 
-当前发布版本：v2.2.9。
+当前发布版本：v2.3.0。
 
 PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平台，已完成真实 CDK 商业授权、安全 SSH 预检、持久化任务引擎、多面板适配器、运营后台、加密迁移和签名在线更新闭环。
 
@@ -13,6 +13,7 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 - [1Panel Node / Compose 部署](docs/deployment/1PANEL.md)
 - [Docker Compose 部署](docs/deployment/DOCKER.md)
 - [备份、更新与故障排查](docs/deployment/OPERATIONS.md)
+- [目录项目安装：宝塔与 AI 面板](docs/deployment/CATALOG.md)
 - [下载面板上传包 xui-zhushou-panel.zip](https://github.com/wstimin/xui-zhushou/releases/latest/download/xui-zhushou-panel.zip)
 
 面板项目选择 Node.js 24 LTS，启动脚本 `panel:start`（`npm run panel:start`），或直接选择启动文件 `panel.cjs`。源码缺少 `dist` 时首次启动会自动构建；Release 上传包已经预编译，仅安装生产依赖。绑定域名前请先配置好 Node 项目或容器运行环境，不能只创建静态/PHP网站。
@@ -39,7 +40,9 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 
 - 使用 SSH 密码或私钥连接 VPS，检测系统、架构、systemd、内存和权限。
 - 项目卡片与部署确认页会提前显示支持系统、最低资源、架构和自动依赖，避免开始安装后才发现限制。
-- 部署 Portainer、Nginx Proxy Manager、哪吒监控或 Uptime Kuma 时，如未检测到 Docker，服务端会自动安装并验证 Docker Engine 与 Compose 后继续部署，无需用户手工准备。
+- 部署 Portainer、Nginx Proxy Manager、哪吒监控、Uptime Kuma、New API、One API 或 CLIProxyAPI 时，如未检测到 Docker，服务端会自动安装并验证 Docker Engine 与 Compose 后继续部署，无需用户手工准备。
+- 目录按用途分为建站面板、代理面板、AI 面板、Docker 面板、监控面板等；1Panel、aaPanel 与宝塔 Linux 面板统一归入“建站面板”，New API、One API 与 CLIProxyAPI 统一归入“AI 面板”。
+- CLIProxyAPI 会自动生成管理密钥和 API Key，但第三方账号 OAuth 必须由账号所有者在管理中心手动授权；系统不会采集或代填第三方账号密码。
 - 安装 3x-ui，并显示精简的阶段进度，不向浏览器暴露完整脚本输出。
 - 可自定义面板管理员用户名和密码；留空时自动生成安全凭据，同时自动生成面板端口和 Web 路径。
 - 面板搭建完成后自动带入 API Token，节点创建直接调用管理 API。
@@ -126,7 +129,7 @@ pa status
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.2.9`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.3.0`。
 
 后台“检测更新”只验证签名清单并显示版本、说明，不下载、不安装、不重启。发现新版本后，手动点击“下载并安装更新”并在站内居中弹窗确认一次，系统会使用本机托管密钥创建更新前快照，再连续完成下载、校验、切换、重启、健康检查和失败回滚，不要求输入更新密码。正式发布包内置锁定的生产依赖，避免在线更新再次等待 npm 下载；旧发布包缺少依赖时仍会限时补齐。生产安装需保留 systemd、PM2 与 Node.js 24 LTS 的可用性。v2.2.6 及更早版本若旧后台停在 50% 或更新无进展，可先在 SSH 终端运行 `pa update` 升级到新版流程。
 

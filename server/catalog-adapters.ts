@@ -31,6 +31,7 @@ export interface CatalogAdapterDefinition {
   exposeAccessUrl?: boolean;
   requiredCommands?: string[];
   autoInstallCommands?: string[];
+  sensitiveVerification?: boolean;
   compatibility?: (environment: Record<string, any>) => string | undefined;
   result?: (payload: Record<string, any>, host: string, verification: string) => Record<string, unknown>;
 }
@@ -46,6 +47,11 @@ function packageInstall(environment: Record<string, any>, packageName: string, s
 
 function persistentContainer(name: string, createCommand: string) {
   return `if docker container inspect ${name} >/dev/null 2>&1; then docker start ${name} >/dev/null; else ${createCommand}; fi`;
+}
+
+function persistentWebContainer(name: string, port: number, internalPort: number, createCommand: string) {
+  const portTemplate = `{{with index .HostConfig.PortBindings "${internalPort}/tcp"}}{{(index . 0).HostPort}}{{end}}`;
+  return `if docker container inspect ${name} >/dev/null 2>&1; then existing_port=$(docker inspect --format ${shellQuote(portTemplate)} ${name}) && { test "$existing_port" = ${port} || { echo "已有容器使用端口 $existing_port，请使用原端口继续，数据和配置未修改" >&2; exit 17; }; } && docker start ${name} >/dev/null; else ${createCommand}; fi`;
 }
 
 function nezhaInstallCommand(payload: Record<string, any>) {
@@ -146,6 +152,91 @@ function aaPanelVerifyCommand(payload: Record<string, any>) {
   ].join(" && ");
 }
 
+function dockerHttpVerifyCommand(containerName: string, hostPort: number, path: string, extra = "") {
+  const url = shellQuote(`http://127.0.0.1:${hostPort}${path}`);
+  const bodyCheck = path === "/api/status" ? `curl -fsS --max-time 5 ${url} | grep -E '"success"[[:space:]]*:[[:space:]]*true' >/dev/null` : ":";
+  return [
+    `docker ps --format '{{.Names}}' | grep -E '^${containerName}$'`,
+    `{ http_code=000; for attempt in $(seq 1 12); do http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 ${url} || true); test \"$http_code\" = 200 && break; sleep 2; done; test \"$http_code\" = 200 && ${bodyCheck} && printf '\\nHTTP %s\\n' \"$http_code\" && ${extra || ":"}; }`,
+  ].join(" && ");
+}
+
+function newApiInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 3000);
+  Object.assign(payload, { __newApiPort: port });
+  const prepare = "install -d -m 700 /opt/panelark/new-api/data /opt/panelark/new-api/logs";
+  const run = persistentWebContainer("panelark-new-api", port, 3000, `docker run -d --name panelark-new-api --restart=unless-stopped -p ${port}:3000 -e TZ=Asia/Shanghai -v /opt/panelark/new-api/data:/data -v /opt/panelark/new-api/logs:/app/logs calciumion/new-api:latest --log-dir /app/logs`);
+  return `${prepare} && ${run}`;
+}
+
+function oneApiInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 3002);
+  Object.assign(payload, { __oneApiPort: port });
+  const prepare = "install -d -m 700 /opt/panelark/one-api/data";
+  const run = persistentWebContainer("panelark-one-api", port, 3000, `docker run -d --name panelark-one-api --restart=unless-stopped -p ${port}:3000 -e TZ=Asia/Shanghai -v /opt/panelark/one-api/data:/data justsong/one-api:v0.6.10`);
+  return `${prepare} && ${run}`;
+}
+
+function cliProxyApiInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 8317);
+  if ([8085, 1455, 54545, 51121, 11451].includes(port)) throw new Error("CPA 主服务端口不能与 OAuth 回调端口相同");
+  Object.assign(payload, { __cliProxyApiPort: port });
+  const root = "/opt/panelark/cliproxyapi";
+  const prepare = [
+    "umask 077",
+    `install -d -m 700 ${root}/auths ${root}/logs ${root}/plugins`,
+    `if test -s ${root}/config.yaml && test ! -s ${root}/credentials.env; then echo '已有 CPA 配置缺少原始凭据，请先检查现有安装，配置未被覆盖' >&2; exit 17; fi`,
+    `if test ! -s ${root}/credentials.env; then management_key=CPA_$(od -An -N24 -tx1 /dev/urandom | tr -d ' \\n'); api_key=sk-cpa-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \\n'); printf 'MANAGEMENT_KEY=%s\\nAPI_KEY=%s\\n' \"$management_key\" \"$api_key\" > ${root}/credentials.env; chmod 600 ${root}/credentials.env; fi`,
+    `. ${root}/credentials.env`,
+    `if test ! -s ${root}/config.yaml; then printf '%s\\n' 'config-version: 8' 'server:' '  host: \"\"' '  port: 8317' 'management:' '  allow-remote: true' \"  secret-key: \\\"$MANAGEMENT_KEY\\\"\" '  disable-control-panel: false' '  panel-github-repository: \"https://github.com/router-for-me/Cli-Proxy-API-Management-Center\"' 'oauth:' '  auth-dir: \"/root/.cli-proxy-api\"' 'access:' '  api-keys:' \"    - \\\"$API_KEY\\\"\" > ${root}/config.yaml && chmod 600 ${root}/config.yaml; fi`,
+  ].join(" && ");
+  const run = persistentWebContainer("panelark-cliproxyapi", port, 8317, `docker run -d --name panelark-cliproxyapi --restart=unless-stopped -p ${port}:8317 -p 8085:8085 -p 1455:1455 -p 54545:54545 -p 51121:51121 -p 11451:11451 -v ${root}/config.yaml:/CLIProxyAPI/config.yaml -v ${root}/auths:/root/.cli-proxy-api -v ${root}/logs:/CLIProxyAPI/logs -v ${root}/plugins:/CLIProxyAPI/plugins eceasy/cli-proxy-api:latest`);
+  return `${prepare} && ${run}`;
+}
+
+function cliProxyApiVerifyCommand(payload: Record<string, any>) {
+  const port = validPort(payload.__cliProxyApiPort, 8317);
+  const credentials = `. /opt/panelark/cliproxyapi/credentials.env && curl -fsS --max-time 5 -H "Authorization: Bearer $MANAGEMENT_KEY" ${shellQuote(`http://127.0.0.1:${port}/v0/management/config`)} >/dev/null && curl -fsS --max-time 5 -H "Authorization: Bearer $API_KEY" ${shellQuote(`http://127.0.0.1:${port}/v1/models`)} >/dev/null && printf 'PANELARK_CPA_MANAGEMENT_KEY=%s\\nPANELARK_CPA_API_KEY=%s\\n' \"$MANAGEMENT_KEY\" \"$API_KEY\"`;
+  return dockerHttpVerifyCommand("panelark-cliproxyapi", port, "/management.html", credentials);
+}
+
+function btPanelInstallCommand() {
+  return [
+    "if command -v bt >/dev/null 2>&1 || test -x /etc/init.d/bt; then echo '宝塔面板已安装，为避免覆盖现有面板，本次安装已停止' >&2; exit 17; fi",
+    "installer=$(mktemp)",
+    "trap 'rm -f \"$installer\"' EXIT",
+    "curl -fLsS https://download.bt.cn/install/installStable_12.sh -o \"$installer\"",
+    "printf 'y\\n' | bash \"$installer\" 3Tmtilpm",
+  ].join(" && ");
+}
+
+function btPanelCompatibility(environment: Record<string, any>) {
+  const id = String(environment.osId || '').toLowerCase();
+  const major = Number.parseInt(String(environment.osVersion || ''), 10);
+  if ((id === 'debian' && major >= 11) || (id === 'ubuntu' && major >= 20)
+    || (['centos', 'rhel', 'almalinux', 'rocky'].includes(id) && major >= 9)) return undefined;
+  return '宝塔稳定版适配器仅开放 Debian 11+、Ubuntu 20.04+ 或 CentOS/RHEL/Alma/Rocky 9+；请使用干净系统';
+}
+
+function btPanelVerifyCommand() {
+  const browserUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36";
+  return [
+    "if systemctl is-active bt 2>/dev/null; then :; elif test -x /etc/init.d/bt; then /etc/init.d/bt status; else exit 1; fi",
+    "panel_port=$(tr -cd '0-9' < /www/server/panel/data/port.pl)",
+    "test -n \"$panel_port\"",
+    "if test -f /www/server/panel/data/ssl.pl; then panel_protocol=https; else panel_protocol=http; fi",
+    "panel_path=$(cat /www/server/panel/data/admin_path.pl 2>/dev/null || true); case \"$panel_path\" in /*|'') : ;; *) panel_path=\"/$panel_path\" ;; esac",
+    "panel_info=$(bt default 2>&1 | tr '\\r\\n' '  ' | sed 's/[[:space:]][[:space:]]*/ /g')",
+    `http_code=$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 20 -A ${shellQuote(browserUserAgent)} \"$panel_protocol://127.0.0.1:$panel_port$panel_path\" || true)`,
+    "case \"$http_code\" in 200|302) : ;; *) exit 1 ;; esac",
+    "printf 'PANELARK_BT_PORT=%s\\nPANELARK_BT_PROTOCOL=%s\\nPANELARK_BT_PATH=%s\\nPANELARK_BT_INFO=%s\\nHTTP %s\\n' \"$panel_port\" \"$panel_protocol\" \"$panel_path\" \"$panel_info\" \"$http_code\"",
+  ].join(" && ");
+}
+
+function markerValue(output: string, key: string) {
+  return output.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim() || undefined;
+}
+
 function steps() {
   return [
     { key: "preflight", title: "检查系统、资源与适配器要求" },
@@ -223,7 +314,7 @@ const definitions: CatalogAdapterDefinition[] = [
     compatibility: environment => String(environment.osId || "").toLowerCase() === "ubuntu" && String(environment.osVersion || "").startsWith("22.04") ? undefined : "Hiddify Manager 当前仅允许安装到 Ubuntu 22.04 干净系统",
   },
   {
-    metadata: metadata({ ...panelBase, id: "1panel", name: "1Panel", category: "服务器面板", accent: "gold", version: "v2 Stable", memory: "1 GB+", port: "10086", description: "面向网站、数据库和容器的 Linux 运维面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS 7+"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true } }),
+    metadata: metadata({ ...panelBase, id: "1panel", name: "1Panel", category: "建站面板", accent: "gold", version: "v2 Stable", memory: "1 GB+", port: "10086", description: "面向网站、数据库和容器的 Linux 运维面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS 7+"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true } }),
     installCommand: payload => onePanelInstallCommand(payload),
     verifyCommand: "systemctl is-active 1panel-core && systemctl is-active 1panel-agent",
     verifyOutput: /^active/m,
@@ -253,6 +344,28 @@ const definitions: CatalogAdapterDefinition[] = [
     }),
   },
   {
+    metadata: metadata({ ...panelBase, id: "bt-panel", name: "宝塔 Linux 面板", category: "建站面板", accent: "gold", version: "12 Stable", memory: "1 GB+ / 5 GB 可用磁盘", port: "随机安全端口", description: "宝塔官方中文版 Linux 运维面板；自动读取安装后的安全入口与完整面板信息。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS/RHEL/Alma/Rocky 9+"], requirements: { os: ["linux"], architectures: ["amd64", "arm64"], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true } }),
+    installCommand: () => btPanelInstallCommand(),
+    verifyCommand: () => btPanelVerifyCommand(),
+    verifyOutput: /PANELARK_BT_PORT=\d+[\s\S]*HTTP (?:200|302)/m,
+    sensitiveVerification: true,
+    accessProtocol: "https",
+    requiredCommands: ["bash", "curl", "systemctl"],
+    compatibility: btPanelCompatibility,
+    result: (_payload, host, verification) => {
+      const port = markerValue(verification, "PANELARK_BT_PORT");
+      const protocol = markerValue(verification, "PANELARK_BT_PROTOCOL") === "http" ? "http" : "https";
+      const path = markerValue(verification, "PANELARK_BT_PATH") || "";
+      return {
+        accessUrl: port ? `${protocol}://${host}:${port}${path}` : undefined,
+        port,
+        path,
+        installInfo: markerValue(verification, "PANELARK_BT_INFO"),
+        nextStep: "请按安装信息登录，并确认云厂商安全组已放行实际面板端口；重复安装会被主动阻止。",
+      };
+    },
+  },
+  {
     metadata: metadata({ ...panelBase, id: "casaos", name: "CasaOS", category: "家庭云面板", accent: "blue", version: "Stable", memory: "1 GB+ / 5 GB 可用磁盘", port: "80", description: "面向家庭服务器和 NAS 的轻量容器面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+"], requirements: { os: ["linux"], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true } }),
     installCommand: "curl -fsSL https://get.casaos.io | bash",
     verifyCommand: "systemctl is-active casaos",
@@ -278,6 +391,52 @@ const definitions: CatalogAdapterDefinition[] = [
     accessProtocol: "http",
     requiredCommands: ["docker"],
     autoInstallCommands: ["docker"],
+  },
+  {
+    metadata: metadata({ ...panelBase, id: "new-api", name: "New API", category: "AI 面板", accent: "blue", version: "Latest Stable", memory: "1 GB+", port: "3000", description: "统一管理多种大模型渠道、令牌、额度和兼容 OpenAI 的 API 接口。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
+    installCommand: payload => newApiInstallCommand(payload),
+    verifyCommand: payload => dockerHttpVerifyCommand("panelark-new-api", validPort(payload.__newApiPort, 3000), "/api/status"),
+    verifyOutput: /panelark-new-api[\s\S]*HTTP 200/m,
+    accessProtocol: "http",
+    requiredCommands: ["docker", "curl"],
+    autoInstallCommands: ["docker"],
+    result: (payload, host) => ({
+      accessUrl: `http://${host}:${payload.__newApiPort}`,
+      port: payload.__newApiPort,
+      nextStep: "首次打开网页后按安装向导创建管理员，再配置上游渠道并生成客户端令牌。",
+    }),
+  },
+  {
+    metadata: metadata({ ...panelBase, id: "one-api", name: "One API", category: "AI 面板", accent: "sage", version: "v0.6.10", memory: "512 MB+", port: "3002", description: "轻量的多渠道大模型 API 管理与分发面板，默认使用独立持久化目录。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-api", "container-verification"] }),
+    installCommand: payload => oneApiInstallCommand(payload),
+    verifyCommand: payload => dockerHttpVerifyCommand("panelark-one-api", validPort(payload.__oneApiPort, 3002), "/api/status"),
+    verifyOutput: /panelark-one-api[\s\S]*HTTP 200/m,
+    accessProtocol: "http",
+    requiredCommands: ["docker", "curl"],
+    autoInstallCommands: ["docker"],
+    result: (payload, host) => ({
+      accessUrl: `http://${host}:${payload.__oneApiPort}`,
+      port: payload.__oneApiPort,
+      installInfo: "新建实例默认账号 root，初始密码 123456；已有实例使用原账号密码。",
+      nextStep: "首次登录后立即修改默认密码，再配置上游渠道。",
+    }),
+  },
+  {
+    metadata: metadata({ ...panelBase, id: "cliproxyapi", name: "CLIProxyAPI（CPA）", category: "AI 面板", accent: "violet", version: "v8 Stable", memory: "512 MB+", port: "8317 / OAuth 回调", description: "将已授权的 AI CLI 账号统一转换为 OpenAI 兼容 API，并提供内置 Web 管理中心。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "ai-gateway", "oauth", "container-verification"] }),
+    installCommand: payload => cliProxyApiInstallCommand(payload),
+    verifyCommand: payload => cliProxyApiVerifyCommand(payload),
+    verifyOutput: /panelark-cliproxyapi[\s\S]*HTTP 200[\s\S]*PANELARK_CPA_MANAGEMENT_KEY=/m,
+    sensitiveVerification: true,
+    accessProtocol: "http",
+    requiredCommands: ["docker", "curl", "od", "tr"],
+    autoInstallCommands: ["docker"],
+    result: (payload, host, verification) => ({
+      accessUrl: `http://${host}:${payload.__cliProxyApiPort}/management.html`,
+      port: payload.__cliProxyApiPort,
+      managementKey: markerValue(verification, "PANELARK_CPA_MANAGEMENT_KEY"),
+      apiToken: markerValue(verification, "PANELARK_CPA_API_KEY"),
+      nextStep: "安装只创建网关、管理密钥和 API Key；OAuth 登录必须由账号所有者在管理中心手动完成。",
+    }),
   },
   {
     metadata: metadata({ ...panelBase, id: "nezha", name: "哪吒监控", category: "监控面板", accent: "rose", version: "Stable", memory: "512 MB+", port: "8008", description: "轻量服务器监控面板与 Agent 管理中心。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "container-verification"] }),
@@ -425,10 +584,10 @@ class CatalogAdapter implements PanelAdapter {
           ? this.definition.verifyCommand(payload, environment as Record<string, any>)
           : this.definition.verifyCommand;
         const verifyCommand = environment.isRoot ? rawVerifyCommand : `sudo -n sh -c ${shellQuote(rawVerifyCommand)}`;
-        const result = await exec(session.client, verifyCommand, { timeoutMs: 30_000 });
+        const result = await exec(session.client, verifyCommand, { timeoutMs: 120_000 });
         if (result.code !== 0 || (this.definition.verifyOutput && !this.definition.verifyOutput.test(result.stdout))) throw new Error(`${this.metadata.name} 安装后验证失败`);
         context.progress(85, `${this.metadata.name} 服务验证通过`);
-        return result.stdout.trim().slice(0, 200);
+        return result.stdout.trim().slice(0, 2_000);
       });
       return context.step("result", async () => {
         const port = this.metadata.port.match(/^\d+/)?.[0];
@@ -436,7 +595,7 @@ class CatalogAdapter implements PanelAdapter {
           ? `${this.definition.accessProtocol || "http"}://${host}:${port}`
           : undefined;
         const extra = this.definition.result?.(payload, host, verification) || {};
-        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification, supportLevel: this.metadata.supportLevel, supportedSystems: this.metadata.supportedSystems, ...extra };
+        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification: this.definition.sensitiveVerification ? "服务与 HTTP 验证通过" : verification, supportLevel: this.metadata.supportLevel, supportedSystems: this.metadata.supportedSystems, ...extra };
       });
     } finally {
       if (ownsSession) session?.client.end?.();

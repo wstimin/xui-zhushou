@@ -9,9 +9,21 @@ import { CatalogPage, CdkGateModal, Header, HomePage } from '../src/panelark/ui.
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
 import { PanelArkMark } from '../src/components/PanelArkMark.js';
+import { deploymentPorts, panels } from '../src/panelark/catalog.js';
 import { JSDOM } from 'jsdom';
 
 const noop = () => {};
+test('AI project ports are configurable and CPA callback ports cannot collide with its API port', () => {
+  for (const id of ['new-api', 'one-api']) {
+    const item = panels.find(item => item.id === id)!;
+    assert.deepEqual(deploymentPorts(item, '4317', false, ''), [4317]);
+    assert.throws(() => deploymentPorts(item, '65536', false, ''), /服务端口/);
+  }
+  const cpa = panels.find(item => item.id === 'cliproxyapi')!;
+  assert.deepEqual(deploymentPorts(cpa, '9317', false, ''), [9317, 8085, 1455, 54545, 51121, 11451]);
+  assert.throws(() => deploymentPorts(cpa, '8085', false, ''), /OAuth 回调端口/);
+  assert.deepEqual(deploymentPorts(panels.find(item => item.id === 'bt-panel')!, '28641', false, ''), []);
+});
 test('all brand surfaces use the shared PanelArk symbol and favicon', () => {
   const symbol = renderToStaticMarkup(<PanelArkMark size={24} aria-label="PanelArk" />);
   assert.match(symbol, /data-panelark-mark=""/);

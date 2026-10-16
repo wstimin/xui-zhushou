@@ -2,6 +2,8 @@
 
 本项目是 Node.js 服务，内置 SQLite 数据库。支持一键脚本、宝塔 Node 项目、1Panel Node 运行环境及 Docker Compose。宝塔/1Panel 在这里用于托管 **PanelArk 本身**，不是要求先安装本项目目录里的目标面板。
 
+若要通过 PanelArk 安装宝塔、New API、One API 或 CLIProxyAPI，请阅读[目录项目安装说明](CATALOG.md)。
+
 | 部署方式 | 适用场景 | 详细步骤 |
 | --- | --- | --- |
 | 一键脚本 | 独立 Linux VPS，终端初始化，不用网页向导；脚本管理 Node、PM2 和更新 | [一键安装](../../README.md#一键安装助手) |

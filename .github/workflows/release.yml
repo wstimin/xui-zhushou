@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Update checks no longer show installation progress|Progress appears only during download, apply and restart|Stable channel only"
+          PANELARK_RELEASE_NOTES: "Added Baota Linux Panel to the website panel category|Added New API, One API and CLIProxyAPI to the AI panel category|Docker dependencies, ports, persistence and post-install verification are handled automatically"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

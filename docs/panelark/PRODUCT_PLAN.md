@@ -206,9 +206,9 @@ CDK 不是网站浏览门禁，但它是所有部署操作的权限门禁。未�
 
 代理类：3x-ui、S-UI、Marzban、Hiddify Manager。
 
-通用类：1Panel、aaPanel、CasaOS、Portainer、Nginx Proxy Manager、哪吒监控、Uptime Kuma。
+建站类：1Panel、aaPanel、宝塔 Linux 面板。通用类：CasaOS、Portainer、Nginx Proxy Manager、哪吒监控、Uptime Kuma。AI 类：New API、One API、CLIProxyAPI。
 
-后续逐步覆盖宝塔、Webmin、Cockpit、CloudPanel、CyberPanel、HestiaCP、Dockge、Cloudreve、AList/OpenList、Vaultwarden、MCSManager、Pterodactyl、Mailcow、File Browser、XBoard/V2Board 相关组件等。
+后续逐步覆盖 Webmin、Cockpit、CloudPanel、CyberPanel、HestiaCP、Dockge、Cloudreve、AList/OpenList、Vaultwarden、MCSManager、Pterodactyl、Mailcow、File Browser、XBoard/V2Board 相关组件等。
 
 只有经过适配和验证的项目才能上架，不能以“任意脚本执行”冒充全面支持。
 

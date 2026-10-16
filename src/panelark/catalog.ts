@@ -1,7 +1,9 @@
 import {
   Activity,
+  Bot,
   Cloud,
   Container,
+  Cpu,
   Globe2,
   Layers3,
   LockKeyhole,
@@ -26,14 +28,21 @@ const dockerPanelRequirements: NonNullable<CatalogItem['requirements']> = {
 
 export const panels: CatalogItem[] = [
   {
-    id: '1panel', adapterId: '1panel', name: '1Panel', category: '服务器面板', icon: PanelTop, accent: 'gold',
+    id: '1panel', adapterId: '1panel', name: '1Panel', category: '建站面板', icon: PanelTop, accent: 'gold',
     description: '现代化 Linux 服务器运维面板，适合网站、数据库与容器服务。',
-    version: 'v2 Stable', memory: '1 GB+', port: '随机安全端口', installed: true, featured: true, kind: 'panel',
+    version: 'v2 Stable', memory: '1 GB+', port: '10086', installed: true, featured: true, kind: 'panel',
   },
   {
     id: 'aapanel', adapterId: 'aapanel', name: 'aaPanel', category: '建站面板', icon: Layers3, accent: 'sage',
     description: '宝塔国际版，快速搭建网站、数据库与常用 Web 环境。',
-    version: 'Latest', memory: '512 MB+', port: '7800', featured: true, kind: 'panel',
+    version: 'Latest', memory: '512 MB+', port: '31750', featured: true, kind: 'panel',
+  },
+  {
+    id: 'bt-panel', adapterId: 'bt-panel', name: '宝塔 Linux 面板', category: '建站面板', icon: PanelTop, accent: 'gold',
+    description: '宝塔官方中文版，安装后自动读取安全入口与完整面板信息。',
+    version: '12 Stable', memory: '1 GB+ / 5 GB 可用磁盘', port: '随机安全端口', featured: true, kind: 'panel',
+    supportedSystems: ['Ubuntu 20.04+', 'Debian 11+', 'CentOS/RHEL/Alma/Rocky 9+'],
+    requirements: { os: ['linux'], architectures: ['amd64', 'arm64'], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true },
   },
   {
     id: '3x-ui', adapterId: '3x-ui', name: '3x-ui', category: '代理面板', icon: Network, accent: 'blue',
@@ -64,6 +73,21 @@ export const panels: CatalogItem[] = [
     id: 'npm', adapterId: 'npm', name: 'Nginx Proxy Manager', category: 'Docker 面板', icon: Globe2, accent: 'sage',
     description: '通过友好界面管理反向代理、证书与访问策略。',
     version: 'Latest', memory: '1 GB+', port: '81', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: { ...dockerPanelRequirements, minRamMb: 1024 },
+  },
+  {
+    id: 'new-api', adapterId: 'new-api', name: 'New API', category: 'AI 面板', icon: Bot, accent: 'blue',
+    description: '统一管理多种大模型渠道、令牌、额度和 OpenAI 兼容接口。',
+    version: 'Latest Stable', memory: '1 GB+', port: '3000', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: { ...dockerPanelRequirements, minRamMb: 1024 },
+  },
+  {
+    id: 'one-api', adapterId: 'one-api', name: 'One API', category: 'AI 面板', icon: Cpu, accent: 'sage',
+    description: '轻量的多渠道大模型 API 管理与分发面板。',
+    version: 'v0.6.10', memory: '512 MB+', port: '3002', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
+  },
+  {
+    id: 'cliproxyapi', adapterId: 'cliproxyapi', name: 'CLIProxyAPI（CPA）', category: 'AI 面板', icon: Network, accent: 'violet',
+    description: '将已授权的 AI CLI 账号转换为 OpenAI 兼容 API，并提供 Web 管理中心。',
+    version: 'v8 Stable', memory: '512 MB+', port: '8317 / OAuth 回调', kind: 'panel', supportedSystems: dockerPanelSystems, requirements: dockerPanelRequirements,
   },
   {
     id: 'nezha', adapterId: 'nezha', name: '哪吒监控', category: '监控面板', icon: Activity, accent: 'rose',
@@ -115,6 +139,19 @@ export const tools: CatalogItem[] = [
   },
 ];
 
+export function hasConfigurablePort(item: CatalogItem) {
+  return ['3x-ui', 'new-api', 'one-api', 'cliproxyapi'].includes(item.adapterId || '');
+}
+
+export function deploymentPorts(item: CatalogItem, servicePort: string, sslEnabled: boolean, domain: string) {
+  const callbackPorts = item.adapterId === 'cliproxyapi' ? [8085, 1455, 54545, 51121, 11451] : [];
+  const port = Number(servicePort);
+  if (hasConfigurablePort(item) && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error('服务端口必须是 1 到 65535 的整数');
+  if (callbackPorts.includes(port)) throw new Error('主服务端口不能与 CPA 的 OAuth 回调端口相同，请选择其他端口');
+  const ports = hasConfigurablePort(item) ? [port, ...callbackPorts] : (item.port.match(/\d+/g) || []).map(Number);
+  return [...new Set([...ports, ...(item.adapterId === '3x-ui' && sslEnabled && domain.trim() ? [80, 443] : [])])];
+}
+
 const adapterIcons: Record<string, CatalogItem['icon']> = {
   '3x-ui': Network,
   's-ui': Network,
@@ -122,9 +159,13 @@ const adapterIcons: Record<string, CatalogItem['icon']> = {
   hiddify: ShieldCheck,
   '1panel': PanelTop,
   aapanel: Layers3,
+  'bt-panel': PanelTop,
   casaos: Cloud,
   portainer: Container,
   npm: Globe2,
+  'new-api': Bot,
+  'one-api': Cpu,
+  cliproxyapi: Network,
   nezha: Activity,
   'uptime-kuma': Activity,
   docker: Container,

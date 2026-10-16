@@ -33,7 +33,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { navItems, panels } from './catalog';
+import { deploymentPorts, hasConfigurablePort, navItems, panels } from './catalog';
 import {
   checkServerPorts,
   connectServer,
@@ -661,6 +661,8 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
   const Icon = item.icon;
   const isProxyPanel = item.category === '代理面板';
   const isThreeXUi = item.adapterId === '3x-ui';
+  const isConfigurablePort = hasConfigurablePort(item);
+  const canChangeConflictPort = isConfigurablePort && !(item.adapterId === 'cliproxyapi' && [8085, 1455, 54545, 51121, 11451].includes(portConflict?.port || 0));
   const requirements = item.requirements;
   const requirementSummary = [
     item.supportedSystems?.length ? `系统：${item.supportedSystems.join('、')}` : '',
@@ -706,11 +708,7 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
     setPhase('error');
   };
 
-  const requiredPorts = () => {
-    const ports = isThreeXUi ? [Number(servicePort)] : (item.port.match(/\d+/g) || []).map(Number);
-    if (isThreeXUi && (!Number.isInteger(ports[0]) || ports[0] < 1 || ports[0] > 65535)) throw new Error('服务端口必须是 1 到 65535 的整数');
-    return [...new Set([...ports, ...(isThreeXUi && sslEnabled && domain.trim() ? [80, 443] : [])])];
-  };
+  const requiredPorts = () => deploymentPorts(item, servicePort, sslEnabled, domain);
 
   const finalizeStart = async (action: 'run' | 'stop') => {
     setLocking(true); setEntitlementError('');
@@ -835,7 +833,7 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
           {requirementSummary ? <div className="deployment-requirements"><ShieldCheck size={16} /><span><strong>安装前提</strong>{requirementSummary}</span></div> : null}
           {requirements?.autoInstallDependencies?.length ? <div className="deployment-auto-dependency"><Boxes size={17} /><span><strong>依赖将自动处理</strong>如果服务器未安装 {requirements.autoInstallDependencies.join(' + ')}，PanelArk 会自动安装、启动并二次验证，无需用户手工操作。</span></div> : null}
           {isThreeXUi ? <><div className="form-grid"><label className="field"><span>面板端口</span><input value={servicePort} onChange={event => setServicePort(event.target.value)} inputMode="numeric" /></label><label className="field"><span>绑定域名（可选）</span><input value={domain} onChange={event => setDomain(event.target.value)} placeholder="panel.example.com" /></label><label className="field"><span>管理员用户名</span><input value={adminUsername} onChange={event => setAdminUsername(event.target.value)} autoComplete="username" /></label><label className="field"><span>管理员密码</span><input type="password" value={adminPassword} onChange={event => setAdminPassword(event.target.value)} autoComplete="new-password" placeholder="至少 8 位" /></label></div>
-          <label className="toggle-row"><span><strong>自动配置 SSL</strong><small>填写域名后额外检查 80/443 端口并处理本机防火墙</small></span><input type="checkbox" checked={sslEnabled} onChange={event => setSslEnabled(event.target.checked)} /><i /></label></> : <div className="notice-line"><ShieldCheck size={16} /><span>此适配器将按官方安装方式执行，并使用目录声明的固定端口与安装后验证规则。</span></div>}
+          <label className="toggle-row"><span><strong>自动配置 SSL</strong><small>填写域名后额外检查 80/443 端口并处理本机防火墙</small></span><input type="checkbox" checked={sslEnabled} onChange={event => setSslEnabled(event.target.checked)} /><i /></label></> : isConfigurablePort ? <><div className="form-grid"><label className="field"><span>面板端口</span><input value={servicePort} onChange={event => setServicePort(event.target.value)} inputMode="numeric" /></label></div><div className="notice-line"><ShieldCheck size={16} /><span>{item.adapterId === 'cliproxyapi' ? '系统会自动安装 Docker、生成管理密钥与 API Key；账号 OAuth 授权需由账号所有者在管理中心手动完成。' : '系统会自动安装 Docker 与项目容器，并在部署后执行网页健康检查。'}</span></div></> : <div className="notice-line"><ShieldCheck size={16} /><span>此适配器将按官方安装方式执行，并使用目录声明的固定端口与安装后验证规则。</span></div>}
           <div className="command-preview"><div><Terminal size={15} /><span>正式部署计划</span><span className="safe-label">服务端适配器</span></div><code>{item.adapterId} · install · 安装后强制验证</code></div>
           <div className="license-benefit compact-benefit"><CheckCircle2 size={17} /><span>点击后先在真实服务器检测端口并尝试放行防火墙，确认可继续时才锁定 CDK 权益</span></div>
           {entitlementError && <p className="deploy-error">{entitlementError}</p>}
@@ -852,7 +850,7 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
             <span><small>可管理服务</small><strong>{portConflict?.service || '未识别，需手工处理'}</strong></span>
             <span><small>影响范围</small><strong>可能短暂中断现有网站</strong></span>
           </div>
-          <button className="choice-card" onClick={() => { setPhase('config'); onToast(isThreeXUi ? '已返回配置，请更换服务或证书端口' : '请先在服务器上停止或迁移占用端口的服务，再重新检查'); }}><span><strong>{isThreeXUi ? '更换使用端口' : '返回并处理端口冲突'}</strong><small>{isThreeXUi ? '返回配置，不影响当前服务' : '固定端口项目需先在服务器上释放该端口'}</small></span><ChevronRight size={17} /></button>
+          <button className="choice-card" onClick={() => { setPhase('config'); onToast(canChangeConflictPort ? '已返回配置，请更换服务端口' : '请先在服务器上停止或迁移占用端口的服务，再重新检查'); }}><span><strong>{canChangeConflictPort ? '更换使用端口' : '返回并处理端口冲突'}</strong><small>{canChangeConflictPort ? '返回配置，不影响当前服务' : '此端口为固定端口，需先在服务器上释放'}</small></span><ChevronRight size={17} /></button>
           {canTemporarilyStopConflict && <button className="choice-card recommended" disabled={locking} onClick={() => void prepareFirewall('stop')}><span><strong>{locking ? '正在准备安全操作…' : `临时停止 ${portConflict?.service} 并继续`}</strong><small>仅在证书阶段暂停，任务结束后恢复；目标机还有 10 分钟兜底恢复</small></span><span className="tag gold-tag">需确认</span></button>}
           {!canTemporarilyStopConflict && <div className="license-benefit compact-benefit"><ShieldCheck size={17} /><span>新服务需要持续使用该端口，不能安全地“临时停止后恢复”；请先迁移或停止现有服务。</span></div>}
           {entitlementError && <p className="deploy-error">{entitlementError}</p>}
@@ -861,7 +859,7 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
         </div>}
         {phase === 'firewall' && <div className="modal-body conflict-body"><div className="conflict-icon"><Network size={27} /></div><span className="eyebrow plain">Cloud firewall check</span><h3>请检查 VPS 厂商安全组</h3><p>{firewallMessage}</p><div className="license-benefit"><ShieldCheck size={17} /><span>PanelArk 已尝试处理 UFW 或 firewalld。本机无法代替你修改阿里云、腾讯云、AWS 等厂商控制台安全组。</span></div>{entitlementError && <p className="deploy-error">{entitlementError}</p>}<div className="modal-actions"><button className="button button-secondary" onClick={() => setPhase(portConflict ? 'conflict' : 'config')}>返回修改</button><button className="button button-primary" disabled={locking} onClick={() => void finalizeStart(pendingAction)}>{locking ? '正在准备…' : '我已检查安全组，继续安装'} <ArrowRight size={15} /></button></div></div>}
         {phase === 'running' && <div className="modal-body running-body"><div className="running-top"><div><span className="eyebrow plain">Persistent deployment task</span><h3>正在执行 {item.name} 任务</h3></div><strong>{progress}%</strong></div><div className="progress-track large"><div style={{ width: `${progress}%` }}><span /></div></div><div className="stage-strip"><span className={progress > 10 ? 'done' : 'active'}>准备环境</span><span className={progress > 36 ? 'done' : progress > 10 ? 'active' : ''}>验证依赖</span><span className={progress > 72 ? 'done' : progress > 36 ? 'active' : ''}>处理端口</span><span className={progress >= 100 ? 'done' : progress > 72 ? 'active' : ''}>收尾核验</span></div><div className="log-panel"><div className="log-head"><span><Terminal size={14} /> 持久化任务日志 {jobId ? `· ${jobId.slice(0, 8)}` : ''}</span><span className="live-dot">LIVE</span></div><div className="log-lines">{logs.length ? logs.map((log, index) => <div key={`${log}-${index}`}><span>{index === logs.length - 1 ? '›' : '✓'}</span>{log}</div>) : <div><span>›</span>正在建立持久化任务会话…</div>}</div></div><p className="running-note">任务由服务端持久化并通过 SSE 推送；3x-ui 使用独立适配器执行真实验证，页面断开不会使任务记录消失。</p></div>}
-        {phase === 'success' && <div className="modal-body success-body"><div className="success-seal"><Check size={28} /></div><span className="eyebrow plain">Deployment complete</span><h3>{item.name} 已完成部署与验证</h3><p>真实 SSH 预检、依赖、端口、防火墙、适配器任务、结果验证和服务恢复均已执行并持久化。</p><div className="result-card"><ResultRow label="目标服务器" value={resultValue('host') || server.environment.targetHost} />{resultValue('accessUrl') && <ResultRow label="实际访问地址" value={resultValue('accessUrl')} onCopy={() => void copyResult('访问地址', resultValue('accessUrl'))} />}{resultValue('username') && <ResultRow label="管理员用户名" value={resultValue('username')} onCopy={() => void copyResult('管理员用户名', resultValue('username'))} />}{resultValue('password') && <ResultRow label="管理员密码" value={resultValue('password')} onCopy={() => void copyResult('管理员密码', resultValue('password'))} />}{resultValue('apiToken') && <ResultRow label="API Token" value={resultValue('apiToken')} onCopy={() => void copyResult('API Token', resultValue('apiToken'))} />}<ResultRow label="安装验证" value="适配器验证通过" success /><ResultRow label="CDK 状态" value="已幂等核销" success /></div><div className="success-actions">{isProxyPanel && <button className="button button-secondary" onClick={() => onToast('可从独立节点任务继续配置代理节点')}>继续搭建节点 <Network size={16} /></button>}<button className="button button-primary" onClick={() => { onToast('部署结果已完成并保存'); onClose(); }}>完成并关闭 <Check size={16} /></button></div></div>}
+        {phase === 'success' && <div className="modal-body success-body"><div className="success-seal"><Check size={28} /></div><span className="eyebrow plain">Deployment complete</span><h3>{item.name} 已完成部署与验证</h3><p>真实 SSH 预检、依赖、端口、防火墙、适配器任务、结果验证和服务恢复均已执行并持久化。</p><div className="result-card"><ResultRow label="目标服务器" value={resultValue('host') || server.environment.targetHost} />{resultValue('accessUrl') && <ResultRow label="实际访问地址" value={resultValue('accessUrl')} onCopy={() => void copyResult('访问地址', resultValue('accessUrl'))} />}{resultValue('username') && <ResultRow label="管理员用户名" value={resultValue('username')} onCopy={() => void copyResult('管理员用户名', resultValue('username'))} />}{resultValue('password') && <ResultRow label="管理员密码" value={resultValue('password')} onCopy={() => void copyResult('管理员密码', resultValue('password'))} />}{resultValue('managementKey') && <ResultRow label="管理密钥" value={resultValue('managementKey')} onCopy={() => void copyResult('管理密钥', resultValue('managementKey'))} />}{resultValue('apiToken') && <ResultRow label="API Token" value={resultValue('apiToken')} onCopy={() => void copyResult('API Token', resultValue('apiToken'))} />}{resultValue('installInfo') && <ResultRow label="安装信息" value={resultValue('installInfo')} onCopy={() => void copyResult('安装信息', resultValue('installInfo'))} />}{resultValue('nextStep') && <ResultRow label="下一步" value={resultValue('nextStep')} />}<ResultRow label="安装验证" value="适配器验证通过" success /><ResultRow label="CDK 状态" value="已幂等核销" success /></div><div className="success-actions">{isProxyPanel && <button className="button button-secondary" onClick={() => onToast('可从独立节点任务继续配置代理节点')}>继续搭建节点 <Network size={16} /></button>}<button className="button button-primary" onClick={() => { onToast('部署结果已完成并保存'); onClose(); }}>完成并关闭 <Check size={16} /></button></div></div>}
         {phase === 'error' && <div className="modal-body success-body"><div className="conflict-icon"><AlertTriangle size={27} /></div><span className="eyebrow plain">Deployment attention</span><h3>{canRetryFinish ? '任务收尾需要重试' : '部署任务未成功'}</h3><p>{entitlementError}</p><div className="license-benefit"><ShieldCheck size={17} /><span>{canRetryFinish ? '系统会重新读取真实交付结果、恢复临时停止的服务，并幂等核销 CDK。' : '系统已尝试恢复临时停止的服务并释放 CDK 权益；如提示恢复失败，请立即登录服务器检查。'}</span></div><div className="modal-actions"><button className="button button-secondary" onClick={onClose}>关闭</button>{canRetryFinish && <button className="button button-primary" onClick={() => void finishEntitlement()}>重试任务收尾</button>}</div></div>}
       </section>
     </div>
@@ -869,5 +867,5 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
 }
 
 function ResultRow({ label, value, onCopy, success }: { label: string; value: string; onCopy?: () => void; success?: boolean }) {
-  return <div className="result-row"><span>{label}</span><strong className={success ? 'success-text' : ''}>{success && <CheckCircle2 size={14} />}{value}</strong>{onCopy && <button onClick={onCopy} aria-label={`复制${label}`}><Copy size={15} /></button>}</div>;
+  return <div className={`result-row${['安装信息', '下一步'].includes(label) ? ' result-row-wrap' : ''}`}><span>{label}</span><strong className={success ? 'success-text' : ''}>{success && <CheckCircle2 size={14} />}{value}</strong>{onCopy && <button onClick={onCopy} aria-label={`复制${label}`}><Copy size={15} /></button>}</div>;
 }

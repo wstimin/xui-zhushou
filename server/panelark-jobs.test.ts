@@ -21,6 +21,26 @@ const steps = [
   { key: "verify", title: "验证结果" },
 ];
 
+test('category migration preserves existing 1Panel overrides and category-limited CDKs', async () => {
+  const { db, directory } = await openDatabase('panelark-category-migration-');
+  let reopened: PanelArkDatabase | undefined;
+  try {
+    const timestamp = new Date().toISOString();
+    db.run("INSERT INTO catalog_overrides(adapter_id, category, enabled, sort_order, updated_at) VALUES ('1panel', '服务器面板', 0, 7, ?)", [timestamp]);
+    db.run("INSERT INTO catalog_overrides(adapter_id, category, updated_at) VALUES ('aapanel', '我的分类', ?)", [timestamp]);
+    db.run("INSERT INTO cdk_packages(id, name, allowed_category, created_at, updated_at) VALUES ('legacy', '旧套餐', '服务器面板', ?, ?)", [timestamp, timestamp]);
+    db.run('DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)');
+    db.close();
+    reopened = await PanelArkDatabase.open(path.join(directory, 'panelark.sqlite'));
+    assert.deepEqual(reopened.get("SELECT category, enabled, sort_order FROM catalog_overrides WHERE adapter_id = '1panel'"), { category: '建站面板', enabled: 0, sort_order: 7 });
+    assert.equal(reopened.get("SELECT category FROM catalog_overrides WHERE adapter_id = 'aapanel'")?.category, '我的分类');
+    assert.equal(reopened.get("SELECT allowed_category FROM cdk_packages WHERE id = 'legacy'")?.allowed_category, '建站面板');
+  } finally {
+    reopened?.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("persistent job engine stores steps/events and redacts secrets", async () => {
   const { db, directory } = await openDatabase("panelark-stage4-logs-");
   try {
@@ -35,12 +55,15 @@ test("persistent job engine stores steps/events and redacts secrets", async () =
       await context.step("preflight", async () => { context.log("password=super-secret"); context.progress(25, "前置检查完成"); });
       await context.step("execute", async () => { context.progress(60, "执行中"); });
       await context.step("verify", async () => { context.progress(100, "验证完成"); });
-      return { accessUrl: "https://example.test", apiToken: "should-not-be-stored" };
+      return { accessUrl: "https://example.test", apiToken: "should-not-be-stored", managementKey: "CPA-sensitive-key", installInfo: "初始密码 chinese-secret" };
     });
     assert.equal(finished.status, "succeeded");
     assert.equal(finished.progress, 100);
     assert.equal(finished.payload.password, "[redacted]");
     assert.equal((finished.result as { apiToken?: unknown })?.apiToken, "[redacted]");
+    assert.equal((finished.result as any)?.managementKey, "[redacted]");
+    assert.equal((finished.result as any)?.installInfo, "[redacted]");
+    assert.doesNotMatch(JSON.stringify(db.get("SELECT result_json FROM deployment_jobs WHERE id = ?", [job.id])), /CPA-sensitive-key|chinese-secret/);
     const rawEvents = db.all<{ message: string; payload_json: string }>("SELECT message, payload_json FROM deployment_events WHERE job_id = ?", [job.id]);
     assert.ok(rawEvents.length >= 7);
     assert.ok(rawEvents.every(event => !event.message.includes("super-secret") && !event.payload_json.includes("super-secret")));

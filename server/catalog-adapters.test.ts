@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { getCatalogAdapterDefinitions, registerCatalogAdapters } from "./catalog-adapters.js";
 import { listPanelAdapters } from "./panel-adapters.js";
 import { panels, tools } from "../src/panelark/catalog.js";
@@ -22,7 +24,7 @@ function context(payload: Record<string, any>) {
 
 test("catalog adapters publish a complete support matrix for panels and tools", () => {
   const definitions = getCatalogAdapterDefinitions();
-  assert.equal(definitions.length, 16);
+  assert.equal(definitions.length, 20);
   for (const item of definitions) {
     assert.ok(item.id && item.name && item.category);
     assert.ok(item.requirements.minRamMb > 0);
@@ -31,19 +33,21 @@ test("catalog adapters publish a complete support matrix for panels and tools", 
   }
   assert.ok(definitions.some(item => item.id === "marzban" && item.requirements.systemd === false));
   assert.ok(definitions.some(item => item.id === "docker" && item.kind === "tool"));
-  for (const id of ["portainer", "npm", "nezha", "uptime-kuma"]) {
+  for (const id of ["portainer", "npm", "nezha", "uptime-kuma", "new-api", "one-api", "cliproxyapi"]) {
     const item = definitions.find(definition => definition.id === id)!;
     assert.deepEqual(item.requirements.architectures, ["amd64", "arm64"]);
     assert.deepEqual(item.requirements.autoInstallDependencies, ["Docker Engine", "Docker Compose"]);
     assert.equal(item.requirements.systemd, true);
   }
+  for (const id of ["1panel", "aapanel", "bt-panel"]) assert.equal(definitions.find(item => item.id === id)?.category, "建站面板");
+  for (const id of ["new-api", "one-api", "cliproxyapi"]) assert.equal(definitions.find(item => item.id === id)?.category, "AI 面板");
 });
 
 test("fallback catalog exposes only registered install adapters", () => {
   registerCatalogAdapters();
   const registered = new Set(listPanelAdapters().map(item => item.id));
   const fallback = [...panels, ...tools];
-  assert.equal(fallback.length, 17);
+  assert.equal(fallback.length, 21);
   assert.equal(new Set(fallback.map(item => item.id)).size, fallback.length);
   for (const item of fallback) {
     assert.equal(item.adapterId, item.id);
@@ -108,7 +112,7 @@ test("catalog adapter blocks CasaOS before its installer requests a TTY on low d
 });
 
 test("every published catalog adapter passes its controlled install and verify path", async () => {
-  const commonOutput = "active\n1.2.3\nmarzban\nportainer\nnpm\nnezha-dashboard\nuptime-kuma\nbbr\n/swapfile\ncertbot 2.0\nHTTP 200\n";
+  const commonOutput = "active\n1.2.3\nmarzban\nportainer\nnpm\nnezha-dashboard\nuptime-kuma\nbbr\n/swapfile\ncertbot 2.0\nPANELARK_BT_PORT=38888\nPANELARK_BT_PATH=/safe-entry\nPANELARK_BT_INFO=address and credentials\npanelark-new-api\npanelark-one-api\npanelark-cliproxyapi\nHTTP 200\nPANELARK_CPA_MANAGEMENT_KEY=CPA_test\nPANELARK_CPA_API_KEY=sk-cpa-test\n";
   const commands: string[] = [];
   const adapters = registerCatalogAdapters({
     connect: async () => ({ client: { end() {} } as any, host: "198.51.100.52", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
@@ -156,9 +160,43 @@ test("every published catalog adapter passes its controlled install and verify p
       assert.ok(result.username);
       assert.ok(result.password);
     }
+    if (adapter.metadata.id === "bt-panel") {
+      assert.match(installCommand, /download\.bt\.cn\/install\/installStable_12\.sh/);
+      assert.match(installCommand, /3Tmtilpm/);
+      assert.match(installCommand, /避免覆盖现有面板/);
+      assert.match(commands.at(-1) || "", /bt default/);
+      assert.equal(result.accessUrl, "https://198.51.100.52:38888/safe-entry");
+      assert.equal(result.installInfo, "address and credentials");
+    }
     if (adapter.metadata.id === "portainer") assert.match(installCommand, /portainer-ce:lts/);
     if (adapter.metadata.id === "nezha") assert.match(installCommand, /ghcr\.io\/nezhahq\/nezha:latest/);
     if (adapter.metadata.id === "uptime-kuma") assert.match(installCommand, /uptime-kuma:2/);
+    if (adapter.metadata.id === "new-api") {
+      assert.match(installCommand, /calciumion\/new-api:latest/);
+      assert.match(installCommand, /panelark-new-api/);
+      assert.match(installCommand, /docker container inspect panelark-new-api/);
+      assert.equal(result.accessUrl, "http://198.51.100.52:3000");
+    }
+    if (adapter.metadata.id === "one-api") {
+      assert.match(installCommand, /justsong\/one-api:v0\.6\.10/);
+      assert.match(installCommand, /panelark-one-api/);
+      assert.match(installCommand, /docker container inspect panelark-one-api/);
+      assert.equal(result.accessUrl, "http://198.51.100.52:3002");
+      assert.match(result.installInfo, /新建实例默认账号 root/);
+    }
+    if (adapter.metadata.id === "cliproxyapi") {
+      assert.match(installCommand, /eceasy\/cli-proxy-api:latest/);
+      assert.match(installCommand, /Cli-Proxy-API-Management-Center/);
+      assert.match(installCommand, /credentials\.env/);
+      assert.match(installCommand, /config-version: 8/);
+      assert.match(installCommand, /management:/);
+      assert.match(installCommand, /api-keys:/);
+      assert.match(installCommand, /docker container inspect panelark-cliproxyapi/);
+      assert.equal(result.accessUrl, "http://198.51.100.52:8317/management.html");
+      assert.equal(result.managementKey, "CPA_test");
+      assert.equal(result.apiToken, "sk-cpa-test");
+      assert.doesNotMatch(result.verification, /CPA_test|sk-cpa-test/);
+    }
     if (adapter.metadata.id === "fail2ban") {
       assert.match(installCommand, /backend = systemd/);
       assert.match(installCommand, /systemctl restart fail2ban/);
@@ -254,4 +292,52 @@ test("catalog adapters enforce compatibility and safely elevate non-root command
   assert.match(commands.at(-2) || "", /^sudo -n sh -c '/);
   assert.match(commands.at(-2) || "", /i\.hiddify\.com\/release/);
   assert.match(commands.at(-1) || "", /^sudo -n sh -c '/);
+});
+
+const bash = process.platform === 'win32'
+  ? ['C:/Program Files/Git/bin/bash.exe', 'C:/Program Files/Git/usr/bin/bash.exe'].find(file => fs.existsSync(file))
+  : 'bash';
+
+test('new adapters use valid shell; repeated AI installs reuse containers and preserve CPA credentials', { skip: !bash }, async () => {
+  const commands: string[] = [];
+  const output = 'PANELARK_BT_PORT=38888\nHTTP 200\npanelark-new-api\npanelark-one-api\npanelark-cliproxyapi\nHTTP 200\nPANELARK_CPA_MANAGEMENT_KEY=CPA_test\n';
+  const adapters = registerCatalogAdapters({
+    connect: async () => ({ client: { end() {} } }) as any,
+    inspect: async () => ({ osId: 'debian', osVersion: '12', packageManager: 'apt', totalRamMb: 4096, diskFreeMb: 20000, systemdAvailable: true, isRoot: true, arch: 'x86_64' }) as any,
+    exec: async (_client, command) => { commands.push(command); return { code: 0, stdout: output, stderr: '' }; },
+  });
+  for (const id of ['bt-panel', 'new-api', 'one-api', 'cliproxyapi']) {
+    commands.length = 0;
+    await adapters.find(item => item.metadata.id === id)!.execute('install', context({ ipOrDomain: '198.51.100.60', servicePort: '9317' }));
+    const install = commands.at(-2)!;
+    const verify = commands.at(-1)!;
+    for (const command of [install, verify]) {
+      const syntax = spawnSync(bash!, ['-n'], { input: command, encoding: 'utf8' });
+      assert.equal(syntax.status, 0, `${id}: ${syntax.stderr}`);
+    }
+    if (id === 'bt-panel') continue;
+    const safeInstall = install.replaceAll('/opt/panelark', '"$test_root"');
+    const safeVerify = verify.replaceAll('/opt/panelark', '"$test_root"');
+    const script = [
+      'set -eu',
+      'test_root=$(mktemp -d)',
+      'trap \'rm -rf -- "$test_root"\' EXIT',
+      process.platform === 'win32' ? 'install() { shift 3; mkdir -p "$@"; }; chmod() { :; }' : ':',
+      'docker() { case "$1" in container) test -f "$test_root/container" ;; inspect) echo 9317 ;; run) touch "$test_root/container"; echo run >> "$test_root/actions" ;; start) echo start >> "$test_root/actions" ;; ps) printf "panelark-new-api\\npanelark-one-api\\npanelark-cliproxyapi\\n" ;; esac; }',
+      'curl() { case "$*" in *http_code*) printf 200 ;; *) printf \'{"success":true}\' ;; esac; }',
+      safeInstall,
+      id === 'cliproxyapi' ? 'first_config=$(cat "$test_root/cliproxyapi/config.yaml"); first_credentials=$(cat "$test_root/cliproxyapi/credentials.env")' : ':',
+      safeInstall,
+      'test "$(grep -c run "$test_root/actions")" = 1; test "$(grep -c start "$test_root/actions")" = 1',
+      id === 'cliproxyapi' ? 'test "$first_config" = "$(cat "$test_root/cliproxyapi/config.yaml")"; test "$first_credentials" = "$(cat "$test_root/cliproxyapi/credentials.env")"; grep -E \'^MANAGEMENT_KEY=CPA_[a-f0-9]{48}$\' "$test_root/cliproxyapi/credentials.env" >/dev/null' : ':',
+      id === 'cliproxyapi' && process.platform !== 'win32' ? 'test "$(stat -c %a "$test_root/cliproxyapi/credentials.env")" = 600' : ':',
+      safeVerify,
+      'curl() { printf 503; }; sleep() { :; }',
+      `if ( ${safeVerify} ); then echo failed-health-check-accepted >&2; exit 1; fi`,
+      'docker() { case "$1" in container) return 0 ;; inspect) echo 1111 ;; *) echo unexpected-operation >&2; return 99 ;; esac; }',
+      `if ( ${safeInstall} ); then echo mismatched-port-accepted >&2; exit 1; fi`,
+    ].join('\n');
+    const simulation = spawnSync(bash!, ['-s'], { input: script, encoding: 'utf8', timeout: 15000 });
+    assert.equal(simulation.status, 0, `${id}: ${simulation.stderr}`);
+  }
 });

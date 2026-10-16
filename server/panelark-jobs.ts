@@ -118,7 +118,7 @@ function redactPayload(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (/password|passwd|token|secret|private|authorization|cookie|credential/i.test(key)) result[key] = "[redacted]";
+    if (/password|passwd|token|secret|private|authorization|cookie|credential|management[_-]?key|installInfo/i.test(key)) result[key] = "[redacted]";
     else if (typeof item === "string") result[key] = redactText(item);
     else if (item && typeof item === "object") result[key] = redactPayload(item);
     else result[key] = item;
