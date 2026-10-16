@@ -386,16 +386,21 @@ class CatalogAdapter implements PanelAdapter {
           const checkCommand = `for command_name in ${required}; do command -v "$command_name" >/dev/null || { echo "$command_name"; exit 127; }; done`;
           let check = await exec(session.client, checkCommand, { timeoutMs: 10_000 });
           const missingCommand = check.stdout.trim().split(/\s+/)[0] || "";
-          if (check.code !== 0 && missingCommand === "docker" && this.definition.autoInstallCommands?.includes("docker")) {
-            context.log(`${this.metadata.name} 未检测到 Docker，正在自动安装 Docker Engine 与 Compose`);
+          const sudo = details.isRoot ? "" : "sudo -n ";
+          const dockerVerifyCommand = `command -v docker >/dev/null && ${sudo}docker info >/dev/null && (${sudo}docker compose version >/dev/null 2>&1 || ${sudo}docker-compose version >/dev/null 2>&1)`;
+          const automaticDocker = this.definition.autoInstallCommands?.includes("docker");
+          const dockerReady = automaticDocker && check.code === 0
+            ? await exec(session.client, dockerVerifyCommand, { timeoutMs: 30_000 })
+            : undefined;
+          if (automaticDocker && ((check.code !== 0 && missingCommand === "docker") || dockerReady?.code !== undefined && dockerReady.code !== 0)) {
+            context.log(`${this.metadata.name} 的 Docker 运行环境未就绪，正在自动安装 Docker Engine 与 Compose 并启动服务`);
             context.progress(10, "正在自动补齐 Docker 运行环境");
             const dockerCommand = buildDockerInstallCommand(String(details.packageManager || ""), !details.isRoot);
             const dockerInstall = await exec(session.client, dockerCommand, { timeoutMs: 20 * 60_000 });
             if (dockerInstall.code !== 0) {
               throw new Error(`${this.metadata.name} 所需 Docker 自动安装失败：${(dockerInstall.stderr || dockerInstall.stdout).slice(-500)}`);
             }
-            const sudo = details.isRoot ? "" : "sudo -n ";
-            const dockerVerify = await exec(session.client, `command -v docker >/dev/null && ${sudo}docker info >/dev/null && (${sudo}docker compose version >/dev/null 2>&1 || ${sudo}docker-compose version >/dev/null 2>&1)`, { timeoutMs: 30_000 });
+            const dockerVerify = await exec(session.client, dockerVerifyCommand, { timeoutMs: 30_000 });
             if (dockerVerify.code !== 0) throw new Error(`${this.metadata.name} 所需 Docker 已安装，但二次验证未通过`);
             context.log("Docker Engine 与 Compose 已自动安装并验证通过");
             check = await exec(session.client, checkCommand, { timeoutMs: 10_000 });

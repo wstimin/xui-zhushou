@@ -138,8 +138,9 @@ export function buildFirewallVerifyCommand(kind: FirewallKind, ports: number[], 
 export function buildDockerInstallCommand(packageManager: string, useSudo: boolean) {
   const prefix = useSudo ? "sudo -n " : "";
   const verify = `command -v docker >/dev/null && (${prefix}docker compose version >/dev/null 2>&1 || ${prefix}docker-compose version >/dev/null 2>&1) && ${prefix}docker info >/dev/null`;
+  const composeReady = `${prefix}docker compose version >/dev/null 2>&1 || ${prefix}docker-compose version >/dev/null 2>&1`;
   if (packageManager === "apt") {
-    return `${prefix}env DEBIAN_FRONTEND=noninteractive apt-get update -y && ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io && (${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2 || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose) && ${prefix}systemctl enable --now docker && ${verify}`;
+    return `${prefix}env DEBIAN_FRONTEND=noninteractive apt-get update -y && (command -v docker >/dev/null || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io) && (${composeReady} || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2 || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || ${prefix}env DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose) && ${prefix}systemctl enable --now docker && ${verify}`;
   }
   if (packageManager === "dnf") {
     return `${prefix}dnf install -y dnf-plugins-core && ${prefix}dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && ${prefix}dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && ${prefix}systemctl enable --now docker && ${verify}`;

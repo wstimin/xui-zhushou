@@ -38,8 +38,8 @@ function writeState(patch) {
   return next;
 }
 
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: 10 * 60_000, env: process.env });
+function run(command, args, cwd, environment = {}) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: 10 * 60_000, env: { ...process.env, ...environment } });
   if (result.error || result.status !== 0) throw new Error(`${command} 执行失败：${result.error?.message || result.stderr || result.stdout || result.status}`.slice(0, 2000));
   return result.stdout;
 }
@@ -71,7 +71,9 @@ function checkHealth(port, secure, version) {
 
 async function waitForHealth(version, env) {
   const port = Number(env.PORT || 1888);
-  const secure = Boolean(env.SSL_CERT && env.SSL_KEY && fs.existsSync(env.SSL_CERT) && fs.existsSync(env.SSL_KEY));
+  const certPath = env.SSL_CERT || "/etc/3xui-assistant/ssl/cert.pem";
+  const keyPath = env.SSL_KEY || "/etc/3xui-assistant/ssl/key.pem";
+  const secure = fs.existsSync(certPath) && fs.existsSync(keyPath);
   for (let attempt = 0; attempt < 30; attempt += 1) {
     if (await checkHealth(port, secure, version)) return true;
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -103,7 +105,7 @@ try {
   fs.renameSync(candidate, target);
   swapped = true;
   writeState({ phase: "restarting", progress: 86, message: "新版本已切换，正在重启并执行健康检查" });
-  run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target);
+  run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target, { APP_VERSION: version });
   if (!await waitForHealth(version, env)) throw new Error("新版本未通过健康检查");
   run("pm2", ["save"], target);
   fs.rmSync(rollback, { recursive: true, force: true });
@@ -114,7 +116,10 @@ try {
     try {
       if (fs.existsSync(target) && safeTarget(target)) fs.rmSync(target, { recursive: true, force: true });
       fs.renameSync(rollback, target);
-      run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target);
+      const previousVersion = fs.readFileSync(path.join(target, "VERSION"), "utf8").trim();
+      run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target, { APP_VERSION: previousVersion });
+      if (!await waitForHealth(previousVersion, parseEnv(path.join(target, ".env")))) throw new Error("旧版本恢复后健康检查未通过");
+      run("pm2", ["save"], target);
       writeState({ phase: "rolled_back", progress: 100, message: "更新失败，已自动恢复旧版本", error: reason });
     } catch (rollbackError) {
       writeState({ phase: "failed", progress: 0, message: "更新与自动回滚均失败，需要人工恢复", error: `${reason}; rollback: ${rollbackError instanceof Error ? rollbackError.message : rollbackError}` });

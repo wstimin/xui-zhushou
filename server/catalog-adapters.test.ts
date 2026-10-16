@@ -208,6 +208,31 @@ test("catalog adapters stop before installation when a non-automatic command is 
   assert.equal(commands.length, 1);
 });
 
+test("container deployments repair incomplete Docker with sudo and stop on failed verification", async () => {
+  for (const verificationSucceeds of [true, false]) {
+    const commands: string[] = [];
+    let dockerChecks = 0;
+    const adapter = registerCatalogAdapters({
+      connect: async () => ({ client: { end() {} } }) as any,
+      inspect: async () => ({ packageManager: "apt", totalRamMb: 4096, systemdAvailable: true, isRoot: false, arch: "aarch64" }) as any,
+      exec: async (_client, command) => {
+        commands.push(command);
+        if (command.startsWith("command -v docker")) {
+          dockerChecks += 1;
+          return { code: dockerChecks === 1 || !verificationSucceeds ? 1 : 0, stdout: "", stderr: "" };
+        }
+        return { code: 0, stdout: "portainer\n", stderr: "" };
+      },
+    }).find(item => item.metadata.id === "portainer")!;
+    const execution = adapter.execute("install", context({ ipOrDomain: "198.51.100.59" }));
+    if (verificationSucceeds) await execution;
+    else await assert.rejects(execution, /二次验证未通过/);
+    assert.ok(commands.some(command => command.includes("sudo -n env DEBIAN_FRONTEND=noninteractive apt-get")));
+    assert.ok(commands.some(command => command.includes("sudo -n docker info")));
+    assert.equal(commands.some(command => command.includes("portainer-ce:lts")), verificationSucceeds);
+  }
+});
+
 test("catalog adapters enforce compatibility and safely elevate non-root commands", async () => {
   let commands: string[] = [];
   const incompatible = registerCatalogAdapters({
