@@ -43,13 +43,13 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 
 ## 一键安装助手
 
-支持 Ubuntu 20.04+、Debian 11+、CentOS 8+、Rocky Linux 和 AlmaLinux。请先切换到 `root` 用户，然后执行以下命令打开原有交互菜单：
+支持 Ubuntu 20.04+、Debian 11+、CentOS 8+、Rocky Linux 和 AlmaLinux。请先切换到 `root` 用户，然后执行以下命令打开交互管理菜单：
 
 ```bash
 bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/wstimin/xui-zhushou/main/install.sh)
 ```
 
-需要跳过菜单、直接执行安装或更新时使用：
+需要跳过菜单、直接执行首次安装时使用（已安装会跳过，不重复安装）：
 
 ```bash
 bash <(curl -fsSL --retry 3 https://raw.githubusercontent.com/wstimin/xui-zhushou/main/install.sh) install
@@ -63,27 +63,41 @@ http://服务器IP:1888
 
 云厂商安全组需要放行助手端口，默认为 `1888/tcp`。申请助手自身的域名证书时还需要临时放行 `80/tcp`。
 
-安装完成后可以运行 `sy` 打开管理菜单：
+安装完成后在 SSH 终端输入 `pa` 即可打开交互管理菜单（保留 `sy` 兼容）。输入 `pa` 或未知参数不会执行安装；无交互终端时必须明确指定子命令。
 
 ```text
-[1] 安装或更新助手（下载远端生产构建包）
+[1] 首次安装助手（已安装则跳过）
 [2] 仅为助手申请域名 SSL 证书并推送到面板
 [3] 查看服务与证书状态
 [4] 检查服务器环境
 [5] 诊断域名访问
 [6] 卸载助手
+[7] 启动服务
+[8] 停止服务
+[9] 重启服务
+[10] 查看最近 100 行运行日志
+[11] 检查并更新版本（相同版本不重复安装）
+[12] 查看首次网页安装令牌
+[13] 修复 pa / sy 快捷命令
+[0] 退出
 ```
 
 常用维护命令：
 
 ```bash
-sy
-pm2 status
-pm2 logs 3xui-deploy-assistant
-sudo bash /opt/3xui-deploy-assistant/install.sh install
+pa
+pa status
+pa start
+pa stop
+pa restart
+pa logs
+pa update
+pa token  # 仅在可信 SSH 终端查看，不要分享输出
 ```
 
-一键脚本默认从 GitHub Releases 下载 `xui-zhushou-linux.tar.gz`，通过 `SHA256SUMS` 校验完整性后部署到 `/opt/3xui-deploy-assistant`。通过 `sy` 或 `sudo bash install.sh install` 更新时，会保留现有 `.env` 配置和 `/etc/3xui-assistant/ssl` 证书目录，仅替换应用构建包并重启 PM2；不会重新申请、安装或覆盖 SSL 证书。新构建包启动失败或运行版本校验不一致时会自动恢复上一版本。
+一键脚本首次安装从 GitHub Releases 下载构建包，通过 `SHA256SUMS` 校验完整性后部署到 `/opt/3xui-deploy-assistant`。更新请运行 `pa update`：先验证签名清单、比较版本，仅在新版本更高时下载对应版本包；相同或更低版本不会下载安装包、安装依赖或重启服务。安装/更新使用互斥锁，防止两个终端同时重复部署。更新保留现有 `.env`、独立业务数据和 `/etc/3xui-assistant/ssl` 证书，仅替换程序并重启 PM2；健康检查失败时自动恢复上一版本。停止、启动和日志操作只管理本项目，不会安装应用。
+
+已有旧版本只有 `sy` 时，先执行一次 `sy install` 更新旧脚本管理的程序；升级至 v2.2.1 后使用 `pa update`。也可以在后台完成在线更新后执行 `bash /opt/3xui-deploy-assistant/install.sh shortcut` 补装 `pa` 命令。宝塔 / 1Panel 项目继续由面板托管，不使用此独立安装菜单管理。
 
 检查服务器当前代码和运行版本：
 
@@ -92,7 +106,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.2.0`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.2.1`。
 
 后台在线更新会校验签名、创建加密备份，再由独立的 systemd 临时服务完成切换、健康检查和失败回滚。生产安装需保留 systemd、PM2 与 Node.js 24 LTS 的可用性。v2.1.7 及更早版本请先运行一次 `sy install`，安装独立更新执行器修复；之后可使用后台在线更新。
 
@@ -161,7 +175,7 @@ POST /panel/setting/defaultSettings
 
 ## 环境配置
 
-本地开发需要 Node.js 20 或更高版本：
+本地开发需要 Node.js 24 或更高版本：
 
 ```bash
 npm ci

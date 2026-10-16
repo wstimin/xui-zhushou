@@ -28,6 +28,8 @@ APP_PORT="${PORT:-$DEFAULT_PORT}"
 MIN_NODE_MAJOR="24"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTIVE_PROJECT_DIR="$TARGET_DIR"
+SHORTCUT_DIR="/usr/local/bin"
+INSTALL_LOCK_FILE="/var/lock/panelark-install.lock"
 
 load_runtime_config() {
   local config_dir=""
@@ -55,7 +57,7 @@ read_installed_version() {
 }
 
 download_release_package() {
-  local work_dir archive_file checksum_file package_dir expected_checksum actual_checksum
+  local work_dir archive_file checksum_file package_dir expected_checksum actual_checksum release_archive_name
   work_dir=$(mktemp -d)
   archive_file="$work_dir/xui-zhushou-linux.tar.gz"
   checksum_file="$work_dir/SHA256SUMS"
@@ -75,7 +77,8 @@ download_release_package() {
     return 1
   fi
 
-  expected_checksum=$(awk '$2 == "xui-zhushou-linux.tar.gz" { print $1; exit }' "$checksum_file")
+  release_archive_name="${RELEASE_URL##*/}"
+  expected_checksum=$(awk -v name="$release_archive_name" '$2 == name { print $1; exit }' "$checksum_file")
   actual_checksum=$(sha256sum "$archive_file" | awk '{ print $1 }')
   if [ -z "$expected_checksum" ] || [ "$expected_checksum" != "$actual_checksum" ]; then
     rm -rf "$work_dir"
@@ -159,7 +162,7 @@ detect_pkg_manager() {
 
 pause_if_tty() {
   if [ -t 0 ]; then
-    read -r -p "按回车键返回主菜单..."
+    read -r -p "按回车键返回主菜单..." || true
   fi
 }
 
@@ -216,7 +219,7 @@ install_node_runtime() {
 }
 
 get_public_ip() {
-  SERVER_IP=$(curl -s4 https://api.ipify.org || curl -s4 https://ipv4.icanhazip.com || echo "您的服务器公网IP")
+  SERVER_IP=$(curl -fsS4 --connect-timeout 3 --max-time 5 https://api.ipify.org || curl -fsS4 --connect-timeout 3 --max-time 5 https://ipv4.icanhazip.com || echo "您的服务器公网IP")
 }
 
 configure_firewall() {
@@ -253,21 +256,131 @@ configure_firewall() {
 }
 
 install_shortcut() {
-  echo -e "${BLUE}[INFO] 正在配置快捷命令 'sy'...${NC}"
-  SHORTCUT_PATH="/usr/local/bin/sy"
-  
-  cat <<EOF > "$SHORTCUT_PATH"
+  local name shortcut_path
+  mkdir -p "$SHORTCUT_DIR"
+  for name in pa sy; do
+    shortcut_path="$SHORTCUT_DIR/$name"
+    if [ -e "$shortcut_path" ] || [ -L "$shortcut_path" ]; then
+      if ! grep -Fq "$TARGET_DIR/install.sh" "$shortcut_path" 2>/dev/null; then
+        echo -e "${RED}[ERROR] $shortcut_path 已被其他程序使用，未覆盖。${NC}"
+        return 1
+      fi
+    fi
+  done
+  for name in pa sy; do
+    shortcut_path="$SHORTCUT_DIR/$name"
+    cat <<EOF > "$shortcut_path"
 #!/usr/bin/env bash
-if [ -f "$ACTIVE_PROJECT_DIR/install.sh" ]; then
-  bash "$ACTIVE_PROJECT_DIR/install.sh" "\$@"
+# PanelArk managed shortcut
+if [ -f "$TARGET_DIR/install.sh" ]; then
+  exec bash "$TARGET_DIR/install.sh" "\$@"
 else
   echo "[ERROR] 部署助手脚本文件未找到，请重新运行一键安装命令！"
+  exit 1
 fi
 EOF
+    chmod 755 "$shortcut_path"
+  done
+  echo -e "${GREEN}[OK] 输入 pa 即可打开管理菜单；旧命令 sy 继续兼容。${NC}"
+}
 
-  chmod +x "$SHORTCUT_PATH"
-  cp -f "$SHORTCUT_PATH" /usr/bin/sy >/dev/null 2>&1 || true
-  echo -e "${GREEN}[OK] 快捷调出命令 'sy' 配置成功！今后在任何位置输入 sy 即可打开交互菜单。${NC}"
+service_status() {
+  if [ ! -f "$TARGET_DIR/dist/server.cjs" ]; then echo "未安装"; return; fi
+  if ! command -v pm2 >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then echo "运行环境缺失"; return; fi
+  pm2 jlist 2>/dev/null | node -e '
+    let input=""; process.stdin.on("data", d=>input+=d); process.stdin.on("end",()=>{
+      try { const p=JSON.parse(input).find(p=>p.name===process.argv[1]);
+        const s=p?.pm2_env?.status; console.log(s==="online"?"运行中":s==="stopped"?"已停止":s||"未启动");
+      } catch { console.log("状态读取失败"); }
+    });' "$APP_NAME" || echo "状态读取失败"
+}
+
+repair_shortcut() {
+  require_installation || return 1
+  install_shortcut
+  pause_if_tty
+}
+
+require_installation() {
+  if [ ! -f "$TARGET_DIR/dist/server.cjs" ] || [ ! -f "$TARGET_DIR/ecosystem.config.cjs" ]; then
+    echo -e "${YELLOW}[INFO] 尚未安装，请先选择首次安装。${NC}"; return 1
+  fi
+  if ! command -v pm2 >/dev/null 2>&1; then
+    echo -e "${RED}[ERROR] PM2 不可用，请检查运行环境；未重复安装应用。${NC}"; return 1
+  fi
+}
+
+manage_service() {
+  local action="$1"
+  require_installation || return 1
+  cd "$TARGET_DIR"
+  load_runtime_config
+  case "$action" in
+    start) pm2 startOrReload ecosystem.config.cjs --update-env ;;
+    stop) pm2 stop "$APP_NAME" ;;
+    restart) pm2 startOrReload ecosystem.config.cjs --update-env ;;
+  esac
+  pm2 save >/dev/null
+  if [ "$action" != stop ]; then
+    APP_VERSION=$(read_installed_version)
+    if ! verify_running_release; then echo -e "${RED}[ERROR] 服务未通过健康检查，请使用 pa logs 排查。${NC}"; return 1; fi
+  fi
+  echo -e "${GREEN}[OK] 操作完成，当前状态：$(service_status)${NC}"
+  pause_if_tty
+}
+
+view_logs() {
+  require_installation || return 1
+  pm2 logs "$APP_NAME" --lines 100 --nostream
+  pause_if_tty
+}
+
+view_setup_token() {
+  require_installation || return 1
+  load_runtime_config
+  local data_dir="${PANELARK_DATA_DIR:-$TARGET_DIR/data}"
+  [[ "$data_dir" = /* ]] || data_dir="$TARGET_DIR/$data_dir"
+  if [ -n "${PANELARK_SETUP_TOKEN:-}" ]; then
+    echo "安装令牌：$PANELARK_SETUP_TOKEN"
+  elif [ -f "$data_dir/admin-setup-token.txt" ]; then
+    echo "安装令牌（请勿分享）："; cat "$data_dir/admin-setup-token.txt"
+  else
+    echo "未找到首次安装令牌；若已经创建管理员，这是安装入口锁定后的正常状态。"
+  fi
+  pause_if_tty
+}
+
+update_assistant() {
+  require_installation || return 1
+  local manifest_file candidate current comparison
+  manifest_file=$(mktemp)
+  if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 "${RELEASE_MANIFEST_URL:-${RELEASE_URL%/*}/release-manifest.json}" -o "$manifest_file"; then
+    rm -f "$manifest_file"; echo "[ERROR] 无法检查新版本，未下载或安装应用。"; return 1
+  fi
+  # Verify the small manifest before using its version or pinned package URL.
+  if ! candidate=$(node - "$manifest_file" "$TARGET_DIR/release-public-key.pem" <<'NODE'
+const fs = require('node:fs'), crypto = require('node:crypto');
+try {
+  const { signature, ...m } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  if (m.product !== 'PanelArk' || m.schemaVersion !== 1 || !/^\d+\.\d+\.\d+$/.test(m.version) || !crypto.verify(null, Buffer.from(JSON.stringify(m)), fs.readFileSync(process.argv[3]), Buffer.from(signature, 'base64'))) throw Error('签名或版本无效');
+  const url = new URL(m.packageUrl);
+  if (url.protocol !== 'https:' || url.username || url.password) throw Error('更新地址无效');
+  console.log(m.version); console.log(m.packageUrl);
+} catch (e) { console.error('[ERROR] 更新清单验证失败：' + e.message); process.exit(1); }
+NODE
+  ); then rm -f "$manifest_file"; return 1; fi
+  rm -f "$manifest_file"
+  EXPECTED_RELEASE_VERSION=$(printf '%s\n' "$candidate" | head -n1)
+  current=$(read_installed_version)
+  comparison=$(node -e 'const [a,b]=process.argv.slice(1).map(v=>v.split(".").map(Number)); if(a.length!==3||b.length!==3||[...a,...b].some(n=>!Number.isInteger(n)))process.exit(1); console.log(a.reduce((r,n,i)=>r||Math.sign(n-b[i]),0));' "$EXPECTED_RELEASE_VERSION" "$current") || { echo "[ERROR] 当前版本无法识别，未执行更新。"; return 1; }
+  if [ "$comparison" -le 0 ]; then
+    echo "[OK] 当前 v$current 已是最新或更高版本，不下载、不重复安装、不重启。"
+    pause_if_tty; return 0
+  fi
+  echo "[INFO] 更新 v$current → v$EXPECTED_RELEASE_VERSION；保留配置、业务数据和证书。"
+  RELEASE_URL=$(printf '%s\n' "$candidate" | tail -n1)
+  RELEASE_CHECKSUM_URL="${RELEASE_URL%/*}/SHA256SUMS"
+  INSTALL_MODE=update install_assistant
 }
 
 check_environment() {
@@ -335,10 +448,23 @@ check_environment() {
 }
 
 install_assistant() {
+  if [ -f "$TARGET_DIR/dist/server.cjs" ] && [ "${INSTALL_MODE:-install}" != update ]; then
+    echo "[OK] 已安装 v$(read_installed_version)，不会重复安装。需要更新请使用菜单 [11] 或 update 子命令（pa update）。"
+    pause_if_tty; return 0
+  fi
+  if ! command -v flock >/dev/null 2>&1; then echo "[ERROR] 缺少 util-linux/flock，无法安全锁定安装任务。"; return 1; fi
+  exec 9>"$INSTALL_LOCK_FILE"
+  if ! flock -n 9; then echo "[ERROR] 另一安装/更新任务正在执行，请勿重复运行。"; return 1; fi
+  if [ -f "$TARGET_DIR/dist/server.cjs" ]; then
+    if [ "${INSTALL_MODE:-install}" != update ] || [ "$(read_installed_version)" = "${EXPECTED_RELEASE_VERSION:-}" ]; then
+      echo "[OK] 当前版本已安装，跳过重复操作。"; return 0
+    fi
+  fi
   echo -e "${CYAN}============================================================${NC}"
   echo -e "${BOLD}             🚀 安装 / 更新 PanelArk 面板方舟             ${NC}"
   echo -e "${CYAN}============================================================${NC}"
 
+  detect_pkg_manager
   echo -e "${BLUE}[1/5] 检查并补全系统必要依赖...${NC}"
   install_base_deps
 
@@ -348,6 +474,9 @@ install_assistant() {
     return 1
   }
   APP_VERSION=$(tr -d '[:space:]' < "$DOWNLOADED_PACKAGE_DIR/VERSION")
+  if [ -n "${EXPECTED_RELEASE_VERSION:-}" ] && [ "$APP_VERSION" != "$EXPECTED_RELEASE_VERSION" ]; then
+    rm -rf "$DOWNLOADED_WORK_DIR"; echo "[ERROR] 下载版本与已验证清单不一致，未安装。"; return 1
+  fi
   if [ -z "$APP_VERSION" ]; then
     rm -rf "$DOWNLOADED_WORK_DIR"
     echo -e "${RED}[ERROR] 构建包没有有效版本号，已停止安装。${NC}"
@@ -484,7 +613,7 @@ install_assistant() {
   echo "============================================================"
   echo -e "${NC}"
 
-  echo -e "⚡ ${BOLD}快捷调出菜单命令:${NC} 输入 ${GREEN}${BOLD}sy${NC} 即可随时打开控制菜单"
+  echo -e "⚡ ${BOLD}快捷调出菜单命令:${NC} 输入 ${GREEN}${BOLD}pa${NC} 即可随时打开控制菜单（兼容 sy）"
   echo -e "📦 ${BOLD}当前部署版本:${NC} ${GREEN}v${APP_VERSION}${NC}"
 
   if [ -f "$SSL_DIR/cert.pem" ] && [ -f "$SSL_DIR/key.pem" ]; then
@@ -499,7 +628,7 @@ install_assistant() {
   echo -e "\n${YELLOW}⚠️ 【重要】如果安装完成后浏览器无法打开页面，请检查：${NC}"
   echo -e "  1. ${BOLD}云厂商安全组/防火墙${NC}: 请登录阿里云/腾讯云/AWS/甲骨文云后台，在【安全组入站规则】中放行 ${YELLOW}${APP_PORT}${NC} 及 ${YELLOW}80${NC} 端口(TCP)！"
   echo -e "  2. ${BOLD}VPS 系统防火墙${NC}: 脚本已自动尝试放行 ufw / firewalld / iptables。如仍受阻，可尝试运行: ${CYAN}ufw allow ${APP_PORT}/tcp${NC}"
-  echo -e "  3. ${BOLD}查看服务状态${NC}: 随时输入 ${CYAN}sy${NC} 选择 [3] 查看信息，或运行 ${CYAN}pm2 status${NC} 查看运行状态。"
+  echo -e "  3. ${BOLD}查看服务状态${NC}: 随时输入 ${CYAN}pa${NC} 选择 [3] 查看信息，或运行 ${CYAN}pm2 status${NC} 查看运行状态。"
   echo "============================================================"
   pause_if_tty
 }
@@ -639,14 +768,14 @@ view_panel_info() {
   APP_VERSION=$(read_installed_version)
   echo -e "📦 ${BOLD}当前构建包版本:${NC} ${GREEN}v${APP_VERSION}${NC}"
 
-  # 1. PM2 进程状态
+  # 1. Read only this application's PM2 state, not the first unrelated process.
   echo -e "\n${BOLD}1️⃣  PanelArk PM2 服务状态:${NC}"
-  if pm2 list 2>/dev/null | grep -q "$APP_NAME"; then
-    PM2_STATUS=$(pm2 jlist 2>/dev/null | grep -o '"status":"[^"]*"' | head -n1 | cut -d'"' -f4 || echo "online")
+  if [ -f "$TARGET_DIR/dist/server.cjs" ]; then
+    PM2_STATUS=$(service_status)
     echo -e "   - 进程名称: ${CYAN}${APP_NAME}${NC}"
-    echo -e "   - 运行状态: ${GREEN}运行中 (${PM2_STATUS})${NC}"
+    echo -e "   - 运行状态: ${GREEN}${PM2_STATUS}${NC}"
     echo -e "   - 监听端口: ${CYAN}${APP_PORT}${NC}"
-    echo -e "   - 快捷调出指令: ${GREEN}sy${NC}"
+    echo -e "   - 快捷调出指令: ${GREEN}pa${NC}（兼容 sy）"
   else
     echo -e "   - 运行状态: ${RED}未启动或未安装${NC}"
   fi
@@ -696,7 +825,9 @@ uninstall_all() {
 
   echo -e "${BLUE}[2/3] 清理 PanelArk 项目目录 (${TARGET_DIR}) 及快捷调出指令...${NC}"
   rm -rf "$TARGET_DIR"
-  rm -f /usr/local/bin/sy /usr/bin/sy
+  for shortcut in /usr/local/bin/pa /usr/local/bin/sy /usr/bin/sy; do
+    if grep -Fq "$TARGET_DIR/install.sh" "$shortcut" 2>/dev/null; then rm -f "$shortcut"; fi
+  done
 
   read -p "是否同时删除保存的 SSL 证书文件 (${SSL_DIR})？[y/N]: " REMOVE_SSL
   if [[ "$REMOVE_SSL" == "y" || "$REMOVE_SSL" == "Y" ]]; then
@@ -705,7 +836,7 @@ uninstall_all() {
     echo -e "${GREEN}[OK] 面板 SSL 证书文件已完全清理！${NC}"
   fi
 
-  echo -e "${GREEN}\n🎉 PanelArk 已彻底卸载并清理完毕！${NC}\n"
+  echo -e "${GREEN}\nPanelArk 程序与本项目快捷命令已卸载；业务数据未删除，请保留或自行备份 ${PANELARK_STATE_DIR} 及自定义数据目录。${NC}\n"
   exit 0
 }
 
@@ -798,50 +929,87 @@ diagnose_domain_access() {
   pause_if_tty
 }
 
+run_menu_action() {
+  local result
+  # An action failure must stop that action without terminating the menu.
+  set +e
+  ( set -e; "$@" )
+  result=$?
+  set -e
+  if [ "$result" -ne 0 ]; then
+    echo -e "${RED}[ERROR] 操作未完成（退出码 $result），请检查上方错误；可以返回菜单重试。${NC}"
+    pause_if_tty
+  fi
+  return 0
+}
+
 show_menu() {
+  local CHOICE
   while true; do
-    clear
+    if [ -t 1 ] && [ -n "${TERM:-}" ]; then clear || true; fi
     echo -e "${CYAN}"
     echo "============================================================"
     echo "          🚀 PanelArk 面板方舟一键管理工具          "
     echo "============================================================"
     echo -e "${NC}"
-    echo -e " ${BOLD}[1]${NC} 安装 / 更新 PanelArk (下载远端生产构建包)"
+    echo -e " 版本：$(read_installed_version)  |  状态：$(service_status)  |  快捷命令：pa"
+    echo "------------------------------------------------------------"
+    echo -e " ${BOLD}[1]${NC} 首次安装 PanelArk（已安装则跳过）"
     echo -e " ${BOLD}[2]${NC} 仅申请域名 SSL 证书并推送到面板 (不安装或更新应用)"
     echo -e " ${BOLD}[3]${NC} 查看当前面板配置与运行状态信息"
     echo -e " ${BOLD}[4]${NC} 检测 VPS 系统与网络运行环境"
     echo -e " ${BOLD}[5]${NC} 🔍 一键诊断与解决【域名无法访问】问题"
     echo -e " ${BOLD}[6]${NC} 卸载与清除 PanelArk 项目"
+    echo -e " ${BOLD}[7]${NC} 启动服务"
+    echo -e " ${BOLD}[8]${NC} 停止服务"
+    echo -e " ${BOLD}[9]${NC} 重启服务"
+    echo -e " ${BOLD}[10]${NC} 查看最近 100 行运行日志"
+    echo -e " ${BOLD}[11]${NC} 检查并更新版本（相同版本不重复安装）"
+    echo -e " ${BOLD}[12]${NC} 查看首次网页安装令牌（敏感信息）"
+    echo -e " ${BOLD}[13]${NC} 修复 pa / sy 快捷命令"
     echo -e " ${BOLD}[0]${NC} 退出脚本"
     echo "============================================================"
     
-    read -p "请输入菜单功能编号 [0-6]: " CHOICE
+    if ! read -r -p "请输入菜单功能编号 [0-13]: " CHOICE; then echo; return 0; fi
     case "$CHOICE" in
-      1) install_assistant ;;
-      2) issue_ssl_cert ;;
-      3) view_panel_info ;;
-      4) check_environment ;;
-      5) diagnose_domain_access ;;
+      1) run_menu_action install_assistant ;;
+      2) run_menu_action issue_ssl_cert ;;
+      3) run_menu_action view_panel_info ;;
+      4) run_menu_action check_environment ;;
+      5) run_menu_action diagnose_domain_access ;;
       6) uninstall_all ;;
+      7) run_menu_action manage_service start ;;
+      8) run_menu_action manage_service stop ;;
+      9) run_menu_action manage_service restart ;;
+      10) run_menu_action view_logs ;;
+      11) run_menu_action update_assistant ;;
+      12) run_menu_action view_setup_token ;;
+      13) run_menu_action repair_shortcut ;;
       0) echo -e "${GREEN}感谢使用！退出管理脚本。${NC}"; exit 0 ;;
-      *) echo -e "${RED}输入无效，请输入 0-6 之间的编号！${NC}"; sleep 1.5 ;;
+      *) echo -e "${RED}输入无效，请输入 0-13 之间的编号！${NC}"; sleep 1 ;;
     esac
   done
 }
 
-# 脚本入口点逻辑
-check_root
-detect_pkg_manager
-
-# 如果在 TTY 交互终端中运行且无命令行参数，直接打开交互菜单
-if [ -t 0 ] && [ -z "$1" ]; then
-  show_menu
-else
-  PARAM="${1:-install}"
-  case "$PARAM" in
+main() {
+  check_root
+  case "${1:-menu}" in
+    menu)
+      if [ -t 0 ]; then show_menu
+      elif { true </dev/tty; } 2>/dev/null; then show_menu </dev/tty
+      else echo "[ERROR] pa 菜单需要交互终端；自动化请明确使用 pa install / update / status 等子命令。"; return 1
+      fi
+      ;;
     install|deploy)
       install_assistant
       ;;
+    update|upgrade)
+      update_assistant
+      ;;
+    start|stop|restart) manage_service "$1" ;;
+    logs|log) view_logs ;;
+    token) view_setup_token ;;
+    shortcut) repair_shortcut ;;
     cert|ssl)
       issue_ssl_cert
       ;;
@@ -855,7 +1023,11 @@ else
       uninstall_all
       ;;
     *)
-      install_assistant
+      echo "用法：pa [menu|install|update|start|stop|restart|status|logs|token|env|cert|uninstall|shortcut]"
+      return 1
       ;;
   esac
-fi
+}
+
+# Sourcing is used only by shell regression tests; it must not install anything.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
