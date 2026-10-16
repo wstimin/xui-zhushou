@@ -6,7 +6,6 @@ import path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import { createServer as createViteServer } from "vite";
 import { buildInbound, InboundInput } from "./server/inbound-builder.js";
 import { buildInstallCommand, connectSsh, execSsh, formatServerInspectionError, inspectServer, SshInput } from "./server/ssh.js";
 import { assertHttpsUrl, cleanHostInput, normalizeWebPath, optionalString, panelPassword, panelUsername, randomToken, validPort } from "./server/validation.js";
@@ -687,6 +686,7 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({ server: { middlewareMode: true, allowedHosts: true }, appType: "spa" });
     const sourceHtml = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
     app.use(async (req, res, next) => {
