@@ -641,6 +641,15 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
   const Icon = item.icon;
   const isProxyPanel = item.category === '代理面板';
   const isThreeXUi = item.adapterId === '3x-ui';
+  const panelPort = Number(servicePort);
+  const canTemporarilyStopConflict = Boolean(
+    isThreeXUi
+    && sslEnabled
+    && domain.trim()
+    && portConflict?.service
+    && [80, 443].includes(portConflict.port)
+    && portConflict.port !== panelPort,
+  );
 
   const resultValue = (key: string) => {
     const value = deploymentResult[key];
@@ -660,6 +669,8 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
       try { await restoreService(grantToken, server.sessionId, tokenToRestore); setRestoreToken(''); }
       catch (reason) { cleanupErrors.push(reason instanceof Error ? reason.message : '临时停止的服务未能自动恢复'); }
     }
+    try { await disconnectServer(grantToken, server.sessionId); }
+    catch (reason) { cleanupErrors.push(reason instanceof Error ? reason.message : 'SSH 安全会话未能主动断开'); }
     try { await releaseCdk(grantToken, taskKey); }
     catch (reason) { cleanupErrors.push(reason instanceof Error ? reason.message : 'CDK 权益释放失败'); }
     onConsumed();
@@ -679,7 +690,7 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
     let newRestoreToken = '';
     try {
       if (action === 'stop') {
-        if (!portConflict?.service) throw new Error('无法识别占用端口的系统服务，请更换端口或手工处理');
+        if (!canTemporarilyStopConflict || !portConflict?.service) throw new Error('该端口会被新服务持续占用，请先手工停止或迁移现有服务');
         const stopped = await temporarilyStopService(grantToken, server.sessionId, portConflict.service);
         newRestoreToken = stopped.restoreToken;
         setRestoreToken(stopped.restoreToken);
@@ -770,6 +781,8 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
         await restoreService(grantToken, server.sessionId, tokenToRestore);
         setRestoreToken('');
       }
+      try { await disconnectServer(grantToken, server.sessionId); }
+      catch { onToast('部署已完成；SSH 会话将由服务器在超时后自动关闭'); }
       await consumeCdk(grantToken, taskKey);
       onConsumed();
       setCanRetryFinish(false);
@@ -810,8 +823,9 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
             <span><small>可管理服务</small><strong>{portConflict?.service || '未识别，需手工处理'}</strong></span>
             <span><small>影响范围</small><strong>可能短暂中断现有网站</strong></span>
           </div>
-          <button className="choice-card" onClick={() => { setPhase('config'); onToast('已返回配置，请更换服务或证书端口'); }}><span><strong>更换使用端口</strong><small>返回配置，不影响当前服务</small></span><ChevronRight size={17} /></button>
-          {portConflict?.service && <button className="choice-card recommended" disabled={locking} onClick={() => void prepareFirewall('stop')}><span><strong>{locking ? '正在准备安全操作…' : `临时停止 ${portConflict.service} 并继续`}</strong><small>记录原始状态，并在任务结束时恢复；目标机还有 10 分钟兜底恢复</small></span><span className="tag gold-tag">需确认</span></button>}
+          <button className="choice-card" onClick={() => { setPhase('config'); onToast(isThreeXUi ? '已返回配置，请更换服务或证书端口' : '请先在服务器上停止或迁移占用端口的服务，再重新检查'); }}><span><strong>{isThreeXUi ? '更换使用端口' : '返回并处理端口冲突'}</strong><small>{isThreeXUi ? '返回配置，不影响当前服务' : '固定端口项目需先在服务器上释放该端口'}</small></span><ChevronRight size={17} /></button>
+          {canTemporarilyStopConflict && <button className="choice-card recommended" disabled={locking} onClick={() => void prepareFirewall('stop')}><span><strong>{locking ? '正在准备安全操作…' : `临时停止 ${portConflict?.service} 并继续`}</strong><small>仅在证书阶段暂停，任务结束后恢复；目标机还有 10 分钟兜底恢复</small></span><span className="tag gold-tag">需确认</span></button>}
+          {!canTemporarilyStopConflict && <div className="license-benefit compact-benefit"><ShieldCheck size={17} /><span>新服务需要持续使用该端口，不能安全地“临时停止后恢复”；请先迁移或停止现有服务。</span></div>}
           {entitlementError && <p className="deploy-error">{entitlementError}</p>}
           <div className="conflict-foot"><ShieldCheck size={15} /><span>恢复动作在目标服务器验证服务重新运行后才算完成。</span></div>
           <div className="modal-actions"><button className="button button-secondary" onClick={onClose}>取消安装</button></div>

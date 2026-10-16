@@ -45,7 +45,7 @@ export interface PanelAdapterMetadata {
   supportedSystems: string[];
   operations: PanelAdapterOperation[];
   capabilities: string[];
-  requirements: { os: string[]; minRamMb: number; systemd: boolean; network: boolean };
+  requirements: { os: string[]; minRamMb: number; minDiskMb?: number; systemd: boolean; network: boolean };
   form: PanelFormField[];
   steps: Record<PanelAdapterOperation, Array<{ key: string; title: string }>>;
 }

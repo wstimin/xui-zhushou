@@ -112,6 +112,12 @@ test("PanelArk remote API confirms fingerprints and controls only observed servi
     assert.equal(firewall.localAction, "not_required");
     assert.equal(firewall.probes[0].reachable, true);
 
+    const taskKey = "disconnect-after-consume";
+    const locked = await fetch(`${base}/cdk/lock`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grantToken: grant.grantToken, taskKey }) });
+    assert.equal(locked.status, 200);
+    const consumed = await fetch(`${base}/cdk/consume`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grantToken: grant.grantToken, taskKey }) });
+    assert.equal(consumed.status, 200);
+
     const disconnected = await fetch(`${base}/server/disconnect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grantToken: grant.grantToken, serverSessionId: connected.serverSessionId }) });
     assert.equal(disconnected.status, 200);
   } finally {

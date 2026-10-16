@@ -276,6 +276,15 @@ export function mountPanelArkRemoteApi(router: Router, db: PanelArkDatabase) {
     return session;
   };
 
+  const getSessionForDisconnect = (grantToken: unknown, sessionId: unknown) => {
+    const token = typeof grantToken === "string" ? grantToken.trim() : "";
+    if (!token) throw new Error("请先验证 CDK");
+    const id = typeof sessionId === "string" ? sessionId : "";
+    const session = sessions.get(id);
+    if (!session || session.grantHash !== sha256(token)) throw new Error("服务器安全会话已失效，请重新连接");
+    return session;
+  };
+
   router.post("/server/connect", async (req, res) => {
     try {
       const grantHash = authorizeGrant(req.body?.grantToken);
@@ -445,7 +454,11 @@ export function mountPanelArkRemoteApi(router: Router, db: PanelArkDatabase) {
 
   router.post("/server/disconnect", (req, res) => {
     try {
-      const session = getSession(req.body?.grantToken, req.body?.serverSessionId, false);
+      // Disconnect must remain available after CDK consumption or expiry. The
+      // session is still scoped to the original opaque grant token by its hash,
+      // so this closes only the caller's own SSH channel without re-authorizing
+      // any other operation.
+      const session = getSessionForDisconnect(req.body?.grantToken, req.body?.serverSessionId);
       removeSession(session.id);
       res.json({ success: true });
     } catch (error) { sendError(res, error); }

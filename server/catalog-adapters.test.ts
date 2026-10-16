@@ -78,8 +78,31 @@ test("catalog adapter refuses an incompatible clean server before installation",
   assert.equal(executed, false);
 });
 
+test("catalog adapter accepts normal provider reservation on a nominal 1 GB VPS", async () => {
+  const adapters = registerCatalogAdapters({
+    connect: async () => ({ client: { end() {} } as any, host: "198.51.100.56", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
+    inspect: async () => ({ osId: "debian", osVersion: "12", packageManager: "apt", totalRamMb: 977, systemdAvailable: true, isRoot: true, status: "compatible", osName: "Debian", arch: "x86_64" }) as any,
+    exec: async () => ({ code: 0, stdout: "active\n", stderr: "" }),
+  });
+  const adapter = adapters.find(item => item.metadata.id === "1panel")!;
+  const result = await adapter.execute("install", context({ ipOrDomain: "198.51.100.56" }) as any) as any;
+  assert.equal(result.adapterId, "1panel");
+});
+
+test("catalog adapter blocks CasaOS before its installer requests a TTY on low disk", async () => {
+  let executed = false;
+  const adapters = registerCatalogAdapters({
+    connect: async () => ({ client: { end() {} } as any, host: "198.51.100.57", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
+    inspect: async () => ({ osId: "debian", osVersion: "12", packageManager: "apt", totalRamMb: 2048, diskFreeMb: 1900, systemdAvailable: true, isRoot: true, status: "compatible", osName: "Debian", arch: "x86_64" }) as any,
+    exec: async () => { executed = true; return { code: 0, stdout: "active\n", stderr: "" }; },
+  });
+  const adapter = adapters.find(item => item.metadata.id === "casaos")!;
+  await assert.rejects(adapter.execute("install", context({ ipOrDomain: "198.51.100.57" }) as any), /至少需要 5120MB 可用磁盘空间/);
+  assert.equal(executed, false);
+});
+
 test("every published catalog adapter passes its controlled install and verify path", async () => {
-  const commonOutput = "active\n1.2.3\nmarzban\nportainer\nnpm\nnezha-dashboard\nuptime-kuma\nbbr\n/swapfile\ncertbot 2.0\n";
+  const commonOutput = "active\n1.2.3\nmarzban\nportainer\nnpm\nnezha-dashboard\nuptime-kuma\nbbr\n/swapfile\ncertbot 2.0\nHTTP 200\n";
   const commands: string[] = [];
   const adapters = registerCatalogAdapters({
     connect: async () => ({ client: { end() {} } as any, host: "198.51.100.52", port: 22, user: "root", fingerprint: "SHA256:test", latencyMs: 4, alive: true }) as any,
@@ -91,15 +114,49 @@ test("every published catalog adapter passes its controlled install and verify p
     const result = await adapter.execute("install", context({ ipOrDomain: "198.51.100.52", sshUser: "root", sshPassword: "secret" }) as any) as any;
     assert.equal(result.adapterId, adapter.metadata.id);
     assert.ok(commands.length >= 2, `${adapter.metadata.id} must run install and verification commands`);
+    if (adapter.metadata.id === "certbot") assert.equal(result.accessUrl, undefined);
     assert.doesNotMatch(commands.at(-1) || "", /grep\s+-[^ ]*q/, `${adapter.metadata.id} verification must preserve output for matching`);
     const installCommand = commands.at(-2) || "";
-    if (adapter.metadata.id === "s-ui") assert.match(installCommand, /alireza0\/s-ui\/master\/install\.sh/);
-    if (adapter.metadata.id === "marzban") assert.match(installCommand, /marzban\.sh\).*@ install/);
+    if (adapter.metadata.id === "s-ui") {
+      assert.match(installCommand, /alireza0\/s-ui\/master\/install\.sh/);
+      assert.match(installCommand, /printf '%s\\n'/);
+      assert.match(result.accessUrl, /^http:\/\/198\.51\.100\.52:2095\/sui_[a-f0-9]{8}\/$/);
+      assert.match(result.username, /^admin_[a-f0-9]{8}$/);
+      assert.match(result.password, /^Sui_/);
+    }
+    if (adapter.metadata.id === "marzban") {
+      assert.match(installCommand, /Marzban-scripts\/raw\/master\/marzban\.sh/);
+      assert.match(installCommand, /setsid bash/);
+      assert.match(installCommand, /docker ps/);
+    }
+    if (adapter.metadata.id === "1panel") {
+      assert.match(installCommand, /PANEL_NON_INTERACTIVE=true/);
+      assert.match(installCommand, /PANEL_ENTRANCE=/);
+      assert.match(commands.at(-1) || "", /1panel-core.*1panel-agent/);
+      assert.match(result.accessUrl, /^http:\/\/198\.51\.100\.52:10086\/[a-f0-9]{16}$/);
+      assert.ok(result.username);
+      assert.match(result.password, /^[A-Za-z0-9!@#$%*_,.?]{8,30}$/);
+    }
     if (adapter.metadata.id === "hiddify") assert.match(installCommand, /i\.hiddify\.com\/release/);
-    if (adapter.metadata.id === "aapanel") assert.match(installCommand, /install_panel_en\.sh/);
+    if (adapter.metadata.id === "aapanel") {
+      assert.match(installCommand, /install_panel_en\.sh/);
+      assert.match(installCommand, /INSTALL_FORCE=true/);
+      assert.match(installCommand, /--safe-path/);
+      assert.match(installCommand, /--port '31750'/);
+      assert.match(commands.at(-1) || "", /systemctl is-active bt.*\/etc\/init\.d\/bt status/);
+      assert.match(commands.at(-1) || "", /Chrome\/141\.0\.0\.0/);
+      assert.match(commands.at(-1) || "", /HTTP %s/);
+      assert.match(result.accessUrl, /^https:\/\/198\.51\.100\.52:31750\/ark_[a-f0-9]{16}$/);
+      assert.ok(result.username);
+      assert.ok(result.password);
+    }
     if (adapter.metadata.id === "portainer") assert.match(installCommand, /portainer-ce:lts/);
     if (adapter.metadata.id === "nezha") assert.match(installCommand, /ghcr\.io\/nezhahq\/nezha:latest/);
     if (adapter.metadata.id === "uptime-kuma") assert.match(installCommand, /uptime-kuma:2/);
+    if (adapter.metadata.id === "fail2ban") {
+      assert.match(installCommand, /backend = systemd/);
+      assert.match(installCommand, /systemctl restart fail2ban/);
+    }
   }
 });
 

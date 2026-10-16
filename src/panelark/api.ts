@@ -144,7 +144,7 @@ export interface PanelAdapterMetadata {
   supportedSystems: string[];
   operations: Array<'install' | 'create-node' | 'get-tls'>;
   capabilities: string[];
-  requirements: { os: string[]; minRamMb: number; systemd: boolean; network: boolean };
+  requirements: { os: string[]; minRamMb: number; minDiskMb?: number; systemd: boolean; network: boolean };
   form: Array<{ key: string; label: string; type: string; required?: boolean; secret?: boolean; options?: Array<{ label: string; value: string }> }>;
   steps: Record<'install' | 'create-node' | 'get-tls', Array<{ key: string; title: string }>>;
 }

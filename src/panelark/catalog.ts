@@ -100,8 +100,8 @@ export const tools: CatalogItem[] = [
   },
   {
     id: 'certbot', adapterId: 'certbot', name: 'SSL 证书工具', category: 'Web 环境', icon: LockKeyhole, accent: 'gold',
-    description: '安装 Certbot/acme.sh 并完成域名证书环境检查。',
-    version: 'Latest', memory: '128 MB+', port: '80 / 443', kind: 'tool',
+    description: '安装 Certbot 并验证 ACME 工具链；安装工具本身不占用端口。',
+    version: 'Latest', memory: '128 MB+', port: '无需端口', kind: 'tool',
   },
 ];
 

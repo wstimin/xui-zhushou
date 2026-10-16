@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   connectSsh,
   execSsh,
@@ -24,11 +25,13 @@ export interface CatalogAdapterDependencies {
 export interface CatalogAdapterDefinition {
   metadata: PanelAdapterMetadata;
   installCommand: string | ((payload: Record<string, any>, useSudo: boolean, environment: Record<string, any>) => string);
-  verifyCommand: string;
+  verifyCommand: string | ((payload: Record<string, any>, environment: Record<string, any>) => string);
   verifyOutput?: RegExp;
   accessProtocol?: "http" | "https";
+  exposeAccessUrl?: boolean;
   requiredCommands?: string[];
   compatibility?: (environment: Record<string, any>) => string | undefined;
+  result?: (payload: Record<string, any>, host: string, verification: string) => Record<string, unknown>;
 }
 
 function packageInstall(environment: Record<string, any>, packageName: string, serviceName?: string, epel = false) {
@@ -60,6 +63,86 @@ function nezhaInstallCommand(payload: Record<string, any>) {
   const writeConfig = `install -d -m 700 /opt/nezha/dashboard/data && printf '%s\\n' ${configLines.map(shellQuote).join(" ")} > /opt/nezha/dashboard/data/config.yaml`;
   const run = persistentContainer("nezha-dashboard", `docker run -d --name nezha-dashboard --restart=always -p ${port}:${port} -v /opt/nezha/dashboard/data:/dashboard/data ghcr.io/nezhahq/nezha:latest`);
   return `${writeConfig} && ${run}`;
+}
+
+function sUiInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 2095);
+  const subscriptionPort = 30_000 + (randomBytes(2).readUInt16BE(0) % 30_000);
+  const requestedUsername = optionalString(payload.panelUsername);
+  const requestedPassword = optionalString(payload.panelPassword);
+  const username = /^[A-Za-z0-9_.@-]{3,64}$/.test(requestedUsername) ? requestedUsername : `admin_${randomBytes(4).toString("hex")}`;
+  const password = requestedPassword.length >= 8 && requestedPassword.length <= 128 ? requestedPassword : `Sui_${randomBytes(12).toString("base64url")}`;
+  const panelPath = `sui_${randomBytes(4).toString("hex")}`;
+  const subscriptionPath = `sub_${randomBytes(4).toString("hex")}`;
+  Object.assign(payload, { __sUiPort: port, __sUiPath: panelPath, __sUiSubscriptionPort: subscriptionPort, __sUiUsername: username, __sUiPassword: password });
+  const answers = ["y", String(port), panelPath, String(subscriptionPort), subscriptionPath, "y", username, password];
+  return `printf '%s\\n' ${answers.map(shellQuote).join(" ")} | SUI_LANG=en bash -c "$(curl -fLsS https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)"`;
+}
+
+function marzbanInstallCommand() {
+  return [
+    "installer=$(mktemp)",
+    "install_log=$(mktemp)",
+    "trap 'rm -f \"$installer\" \"$install_log\"' EXIT",
+    "curl -fLsS https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh -o \"$installer\"",
+    "setsid bash \"$installer\" install >\"$install_log\" 2>&1 & installer_pid=$!",
+    "ready=0",
+    "for attempt in $(seq 1 120); do if docker ps --format '{{.Names}}' | grep -Eq 'marzban'; then ready=1; break; fi; if ! kill -0 \"$installer_pid\" 2>/dev/null; then wait \"$installer_pid\"; code=$?; tail -n 80 \"$install_log\"; exit \"$code\"; fi; sleep 5; done",
+    "if [ \"$ready\" -ne 1 ]; then kill -TERM -- -\"$installer_pid\" 2>/dev/null || true; tail -n 80 \"$install_log\"; exit 1; fi",
+    "kill -TERM -- -\"$installer_pid\" 2>/dev/null || true",
+    "wait \"$installer_pid\" 2>/dev/null || true",
+    "tail -n 20 \"$install_log\"",
+  ].join("; ");
+}
+
+function onePanelInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 10086);
+  const requestedUsername = optionalString(payload.panelUsername);
+  const requestedPassword = optionalString(payload.panelPassword);
+  const username = /^[A-Za-z0-9_.@-]{3,64}$/.test(requestedUsername) ? requestedUsername : `admin_${randomBytes(4).toString("hex")}`;
+  const password = /^[A-Za-z0-9!@#$%*_,.?]{8,30}$/.test(requestedPassword)
+    ? requestedPassword
+    : `One_${randomBytes(10).toString("hex")}!`;
+  const entrance = randomBytes(8).toString("hex");
+  Object.assign(payload, { __onePanelPort: port, __onePanelEntrance: entrance, __onePanelUsername: username, __onePanelPassword: password });
+  const environment = [
+    "PANEL_NON_INTERACTIVE=true",
+    `PANEL_INSTALL_DIR=${shellQuote("/opt")}`,
+    `PANEL_PORT=${shellQuote(String(port))}`,
+    `PANEL_ENTRANCE=${shellQuote(entrance)}`,
+    `PANEL_USERNAME=${shellQuote(username)}`,
+    `PANEL_PASSWORD=${shellQuote(password)}`,
+  ].join(" ");
+  return `env ${environment} bash -c "$(curl -fLsS https://resource.fit2cloud.com/1panel/package/v2/quick_start.sh)"`;
+}
+
+function aaPanelInstallCommand(payload: Record<string, any>) {
+  const port = validPort(payload.servicePort, 31750);
+  const requestedUsername = optionalString(payload.panelUsername);
+  const requestedPassword = optionalString(payload.panelPassword);
+  const username = /^[A-Za-z0-9_.@-]{3,64}$/.test(requestedUsername) ? requestedUsername : `admin_${randomBytes(4).toString("hex")}`;
+  const password = requestedPassword.length >= 8 && requestedPassword.length <= 128 ? requestedPassword : `Aa_${randomBytes(12).toString("base64url")}`;
+  const safePath = `ark_${randomBytes(8).toString("hex")}`;
+  Object.assign(payload, { __aaPanelPort: port, __aaPanelPath: safePath, __aaPanelUsername: username, __aaPanelPassword: password });
+  return [
+    "installer=$(mktemp)",
+    "trap 'rm -f \"$installer\"' EXIT",
+    "curl -fLsS https://www.aapanel.com/script/install_panel_en.sh -o \"$installer\"",
+    `env INSTALL_FORCE=true bash "$installer" -y --user ${shellQuote(username)} --password ${shellQuote(password)} --port ${shellQuote(String(port))} --safe-path ${shellQuote(safePath)} forum`,
+  ].join(" && ");
+}
+
+function aaPanelVerifyCommand(payload: Record<string, any>) {
+  const port = validPort(payload.__aaPanelPort, 31750);
+  const safePath = optionalString(payload.__aaPanelPath);
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(safePath)) throw new Error("aaPanel 安全入口未正确生成");
+  const browserUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36";
+  return [
+    "if systemctl is-active bt 2>/dev/null; then :; elif test -x /etc/init.d/bt; then /etc/init.d/bt status; else exit 1; fi",
+    `http_code=$(curl -k -sS -o /dev/null -w '%{http_code}' --max-time 20 -A ${shellQuote(browserUserAgent)} ${shellQuote(`https://127.0.0.1:${port}/${safePath}`)})`,
+    "test \"$http_code\" = 200",
+    "printf '\\nHTTP %s\\n' \"$http_code\"",
+  ].join(" && ");
 }
 
 function steps() {
@@ -106,19 +189,27 @@ const toolBase = {
 const definitions: CatalogAdapterDefinition[] = [
   {
     metadata: metadata({ ...panelBase, id: "s-ui", name: "S-UI", category: "代理面板", accent: "sage", version: "Stable", memory: "512 MB+", port: "2095", description: "轻量 Xray 面板，提供基础入站和用户管理能力。" }),
-    installCommand: "bash -c \"$(curl -fLsS https://raw.githubusercontent.com/alireza0/s-ui/master/install.sh)\"",
+    installCommand: payload => sUiInstallCommand(payload),
     verifyCommand: "systemctl is-active s-ui",
     verifyOutput: /^active/m,
     accessProtocol: "http",
     requiredCommands: ["bash", "curl", "systemctl"],
+    result: (payload, host) => ({
+      accessUrl: `http://${host}:${payload.__sUiPort}/${payload.__sUiPath}/`,
+      port: payload.__sUiPort,
+      path: `/${payload.__sUiPath}/`,
+      subscriptionPort: payload.__sUiSubscriptionPort,
+      username: payload.__sUiUsername,
+      password: payload.__sUiPassword,
+    }),
   },
   {
     metadata: metadata({ ...panelBase, id: "marzban", name: "Marzban", category: "代理面板", accent: "gold", version: "Stable", memory: "1 GB+", port: "8000", description: "基于 FastAPI 和 Xray 的多用户代理面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+"], requirements: { os: ["linux"], minRamMb: 1024, systemd: false, network: true } }),
-    installCommand: "bash -c \"$(curl -fLsS https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh)\" @ install",
+    installCommand: () => marzbanInstallCommand(),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E 'marzban'",
     verifyOutput: /marzban/m,
     accessProtocol: "http",
-    requiredCommands: ["bash", "curl"],
+    requiredCommands: ["bash", "curl", "setsid"],
     compatibility: environment => ["ubuntu", "debian"].includes(String(environment.osId || "").toLowerCase()) ? undefined : "Marzban 官方一键安装仅在 Ubuntu/Debian 上启用",
   },
   {
@@ -132,22 +223,36 @@ const definitions: CatalogAdapterDefinition[] = [
   },
   {
     metadata: metadata({ ...panelBase, id: "1panel", name: "1Panel", category: "服务器面板", accent: "gold", version: "v2 Stable", memory: "1 GB+", port: "10086", description: "面向网站、数据库和容器的 Linux 运维面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS 7+"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true } }),
-    installCommand: "bash -c \"$(curl -fLsS https://resource.fit2cloud.com/1panel/package/v2/quick_start.sh)\"",
-    verifyCommand: "systemctl is-active 1panel",
+    installCommand: payload => onePanelInstallCommand(payload),
+    verifyCommand: "systemctl is-active 1panel-core && systemctl is-active 1panel-agent",
     verifyOutput: /^active/m,
     accessProtocol: "http",
     requiredCommands: ["bash", "curl", "systemctl"],
+    result: (payload, host) => ({
+      accessUrl: `http://${host}:${payload.__onePanelPort}/${payload.__onePanelEntrance}`,
+      port: payload.__onePanelPort,
+      path: `/${payload.__onePanelEntrance}`,
+      username: payload.__onePanelUsername,
+      password: payload.__onePanelPassword,
+    }),
   },
   {
-    metadata: metadata({ ...panelBase, id: "aapanel", name: "aaPanel", category: "建站面板", accent: "sage", version: "Latest", memory: "512 MB+", port: "31750", description: "适合网站、数据库和 Web 环境的运维面板。", supportedSystems: ["Ubuntu 22/24/26", "Debian 11/12/13", "CentOS 9+", "Rocky/Alma 8+"], requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true } }),
-    installCommand: "installer=$(mktemp) && trap 'rm -f \"$installer\"' EXIT && curl -fLsS https://www.aapanel.com/script/install_panel_en.sh -o \"$installer\" && printf 'y\\n' | bash \"$installer\" forum",
-    verifyCommand: "systemctl is-active bt",
-    verifyOutput: /^active/m,
+    metadata: metadata({ ...panelBase, id: "aapanel", name: "aaPanel", category: "建站面板", accent: "sage", version: "Latest", memory: "512 MB+ / 1 GB 可用磁盘", port: "31750", description: "适合网站、数据库和 Web 环境的运维面板。", supportedSystems: ["Ubuntu 22/24/26", "Debian 11/12/13", "CentOS 9+", "Rocky/Alma 8+"], requirements: { os: ["linux"], minRamMb: 512, minDiskMb: 1024, systemd: true, network: true } }),
+    installCommand: payload => aaPanelInstallCommand(payload),
+    verifyCommand: payload => aaPanelVerifyCommand(payload),
+    verifyOutput: /(?:active|already running|running)[\s\S]*HTTP 200/i,
     accessProtocol: "https",
     requiredCommands: ["bash", "curl", "systemctl"],
+    result: (payload, host) => ({
+      accessUrl: `https://${host}:${payload.__aaPanelPort}/${payload.__aaPanelPath}`,
+      port: payload.__aaPanelPort,
+      path: `/${payload.__aaPanelPath}`,
+      username: payload.__aaPanelUsername,
+      password: payload.__aaPanelPassword,
+    }),
   },
   {
-    metadata: metadata({ ...panelBase, id: "casaos", name: "CasaOS", category: "家庭云面板", accent: "blue", version: "Stable", memory: "1 GB+", port: "80", description: "面向家庭服务器和 NAS 的轻量容器面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true } }),
+    metadata: metadata({ ...panelBase, id: "casaos", name: "CasaOS", category: "家庭云面板", accent: "blue", version: "Stable", memory: "1 GB+ / 5 GB 可用磁盘", port: "80", description: "面向家庭服务器和 NAS 的轻量容器面板。", supportedSystems: ["Ubuntu 20.04+", "Debian 11+"], requirements: { os: ["linux"], minRamMb: 1024, minDiskMb: 5120, systemd: true, network: true } }),
     installCommand: "curl -fsSL https://get.casaos.io | bash",
     verifyCommand: "systemctl is-active casaos",
     verifyOutput: /^active/m,
@@ -200,11 +305,16 @@ const definitions: CatalogAdapterDefinition[] = [
     installCommand: (_payload, _useSudo, environment) => packageInstall(environment, "nginx", "nginx"),
     verifyCommand: "systemctl is-active nginx",
     verifyOutput: /^active/m,
+    exposeAccessUrl: true,
     requiredCommands: ["systemctl"],
   },
   {
     metadata: metadata({ ...toolBase, id: "fail2ban", name: "Fail2Ban", category: "安全加固", accent: "rose", version: "Latest", memory: "128 MB+", port: "无需端口", description: "安装并验证 SSH 暴力破解防护服务。", capabilities: ["ssh-install", "security", "service-verification"] }),
-    installCommand: (_payload, _useSudo, environment) => packageInstall(environment, "fail2ban", "fail2ban", true),
+    installCommand: (_payload, _useSudo, environment) => {
+      const install = packageInstall(environment, "fail2ban", undefined, true);
+      const journaldJail = "install -d -m 755 /etc/fail2ban/jail.d && printf '%s\\n' '[sshd]' 'enabled = true' 'backend = systemd' > /etc/fail2ban/jail.d/panelark-sshd.local";
+      return `${install} && ${journaldJail} && systemctl enable fail2ban && systemctl restart fail2ban`;
+    },
     verifyCommand: "systemctl is-active fail2ban",
     verifyOutput: /^active/m,
     requiredCommands: ["systemctl"],
@@ -224,7 +334,7 @@ const definitions: CatalogAdapterDefinition[] = [
     requiredCommands: ["dd", "mkswap", "swapon"],
   },
   {
-    metadata: metadata({ ...toolBase, id: "certbot", name: "SSL 证书工具", category: "Web 环境", accent: "gold", version: "Latest", memory: "128 MB+", port: "80 / 443", description: "安装 Certbot 并验证 ACME 工具链。", capabilities: ["ssh-install", "certificate", "acme"] }),
+    metadata: metadata({ ...toolBase, id: "certbot", name: "SSL 证书工具", category: "Web 环境", accent: "gold", version: "Latest", memory: "128 MB+", port: "无需端口", description: "安装 Certbot 并验证 ACME 工具链；安装工具本身不占用端口。", capabilities: ["ssh-install", "certificate", "acme"] }),
     installCommand: (_payload, _useSudo, environment) => packageInstall(environment, "certbot", undefined, true),
     verifyCommand: "certbot --version",
     verifyOutput: /certbot\s+\d+/i,
@@ -250,7 +360,11 @@ class CatalogAdapter implements PanelAdapter {
         session = payload.sshSession || await connect(payload, { timeoutMs: 25_000 });
         const details = await inspect(session);
         const requirements = this.metadata.requirements;
-        if (details.totalRamMb && details.totalRamMb < requirements.minRamMb) throw new Error(`${this.metadata.name} 至少需要 ${requirements.minRamMb}MB 内存`);
+        // VPS providers advertise nominal memory while Linux reports slightly
+        // less after firmware/kernel reservations (a 1 GB plan is often 970–1000 MB).
+        const minimumReportedRamMb = Math.ceil(requirements.minRamMb * 0.95);
+        if (details.totalRamMb && details.totalRamMb < minimumReportedRamMb) throw new Error(`${this.metadata.name} 至少需要 ${requirements.minRamMb}MB 内存`);
+        if (requirements.minDiskMb && details.diskFreeMb < requirements.minDiskMb) throw new Error(`${this.metadata.name} 至少需要 ${requirements.minDiskMb}MB 可用磁盘空间`);
         if (requirements.systemd && !details.systemdAvailable) throw new Error(`${this.metadata.name} 要求 systemd 作为 PID 1`);
         const compatibilityError = this.definition.compatibility?.(details as Record<string, any>);
         if (compatibilityError) throw new Error(compatibilityError);
@@ -277,7 +391,10 @@ class CatalogAdapter implements PanelAdapter {
       });
       const verification = await context.step("verify", async () => {
         if (!session) throw new Error("SSH 会话未建立");
-        const verifyCommand = environment.isRoot ? this.definition.verifyCommand : `sudo -n sh -c ${shellQuote(this.definition.verifyCommand)}`;
+        const rawVerifyCommand = typeof this.definition.verifyCommand === "function"
+          ? this.definition.verifyCommand(payload, environment as Record<string, any>)
+          : this.definition.verifyCommand;
+        const verifyCommand = environment.isRoot ? rawVerifyCommand : `sudo -n sh -c ${shellQuote(rawVerifyCommand)}`;
         const result = await exec(session.client, verifyCommand, { timeoutMs: 30_000 });
         if (result.code !== 0 || (this.definition.verifyOutput && !this.definition.verifyOutput.test(result.stdout))) throw new Error(`${this.metadata.name} 安装后验证失败`);
         context.progress(85, `${this.metadata.name} 服务验证通过`);
@@ -285,8 +402,11 @@ class CatalogAdapter implements PanelAdapter {
       });
       return context.step("result", async () => {
         const port = this.metadata.port.match(/^\d+/)?.[0];
-        const accessUrl = port ? `${this.definition.accessProtocol || "http"}://${host}:${port}` : undefined;
-        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification, supportLevel: this.metadata.supportLevel, supportedSystems: this.metadata.supportedSystems };
+        const accessUrl = port && (this.definition.accessProtocol || this.definition.exposeAccessUrl)
+          ? `${this.definition.accessProtocol || "http"}://${host}:${port}`
+          : undefined;
+        const extra = this.definition.result?.(payload, host, verification) || {};
+        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification, supportLevel: this.metadata.supportLevel, supportedSystems: this.metadata.supportedSystems, ...extra };
       });
     } finally {
       if (ownsSession) session?.client.end?.();

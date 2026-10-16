@@ -77,7 +77,7 @@ cat /opt/3xui-deploy-assistant/VERSION
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.2`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.1.3`。
 
 ## 远端构建与发布
 
