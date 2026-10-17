@@ -5,11 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AdminAccess } from '../src/admin/AdminApp.js';
 import { AdminApiError, adminApi, allPackageOptions } from '../src/admin/api.js';
 import { PurchaseLink } from '../src/panelark/PurchaseLink.js';
-import { CatalogPage, CdkGateModal, Header, HomePage } from '../src/panelark/ui.js';
+import { CatalogPage, CdkGateModal, DeployModal, Header, HomePage } from '../src/panelark/ui.js';
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
 import { PanelArkMark } from '../src/components/PanelArkMark.js';
-import { deploymentPorts, panels } from '../src/panelark/catalog.js';
+import { adapterMetadataToCatalog, deploymentPorts, panels, tools } from '../src/panelark/catalog.js';
+import type { PanelAdapterMetadata } from '../src/panelark/api.js';
+import type { ActiveServer } from '../src/panelark/types.js';
 import { JSDOM } from 'jsdom';
 
 const noop = () => {};
@@ -25,12 +27,33 @@ test('AI project ports are configurable and CPA callback ports cannot collide wi
   assert.deepEqual(deploymentPorts(panels.find(item => item.id === 'bt-panel')!, '28641', false, ''), []);
 });
 
-test('catalog distinguishes a tested system from the wider declared compatibility range', () => {
-  const html = renderToStaticMarkup(<CatalogPage items={panels.filter(item => item.id === 'new-api')} title="面板目录" eyebrow="Catalog" description="test" deploymentUnlocked={false} serverConnected={false} purchaseEnabled={false} purchaseButtonText="购买 CDK" onDeploy={noop} onConnect={noop} />);
-  assert.match(html, /部分系统已验收/);
-  assert.match(html, /Debian 12 · amd64/);
-  assert.match(html, /其他系统待验收/);
-  assert.doesNotMatch(html, />实机已验证</);
+test('public catalog and deployment confirmation show requirements but never internal acceptance labels', () => {
+  // Simulate stale metadata from a previous server: the UI must not render it.
+  const items = panels.map(item => ({ ...item, supportLevel: 'pending', verifiedSystems: ['internal-test-system'] }));
+  const html = renderToStaticMarkup(<CatalogPage items={items} title="面板目录" eyebrow="Catalog" description="test" deploymentUnlocked={false} serverConnected={false} purchaseEnabled={false} purchaseButtonText="购买 CDK" onDeploy={noop} onConnect={noop} />);
+  const confirmation = renderToStaticMarkup(<DeployModal item={items.find(item => item.id === 'new-api')!} grantToken="test-grant" server={{ sessionId: 'test-session', environment: { targetHost: 'example.test', sshPort: 22 } } as ActiveServer} onConsumed={noop} onClose={noop} onToast={noop} />);
+  for (const surface of [html, confirmation]) {
+    assert.doesNotMatch(surface, /验收|实机已测|实机已验证|实测环境|internal-test-system/);
+    assert.match(surface, /Ubuntu 20.04\+/);
+    assert.match(surface, /Debian 11\+/);
+    assert.match(surface, /amd64/);
+    assert.match(surface, /systemd/);
+  }
+  assert.match(html, /无需手工准备/);
+  assert.match(html, /Docker Engine \+ Docker Compose/);
+  assert.match(html, /可用磁盘/);
+});
+
+test('public catalog mapping drops stale internal metadata and never fabricates installation state', () => {
+  const metadata = { ...panels.find(item => item.id === 'new-api')!, enabled: true, supportLevel: 'pending', verifiedSystems: ['internal-test-system'] };
+  const [mapped] = adapterMetadataToCatalog([metadata as unknown as PanelAdapterMetadata]);
+  assert.equal('supportLevel' in mapped, false);
+  assert.equal('verifiedSystems' in mapped, false);
+  assert.ok([...panels, ...tools].every(item => item.installed === undefined));
+  for (const serverConnected of [false, true]) {
+    const html = renderToStaticMarkup(<CatalogPage items={[mapped]} title="面板目录" eyebrow="Catalog" description="test" deploymentUnlocked={serverConnected} serverConnected={serverConnected} purchaseEnabled={false} purchaseButtonText="购买 CDK" onDeploy={noop} onConnect={noop} />);
+    assert.doesNotMatch(html, />已安装<|>未安装</);
+  }
 });
 test('all brand surfaces use the shared PanelArk symbol and favicon', () => {
   const symbol = renderToStaticMarkup(<PanelArkMark size={24} aria-label="PanelArk" />);

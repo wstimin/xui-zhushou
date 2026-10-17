@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import express from "express";
 import { mountPanelArkApi } from "./panelark-api.js";
-import { totpCode } from "./panelark-security.js";
+import { sha256, totpCode } from "./panelark-security.js";
 
 async function json(response: Response) {
   return response.json() as Promise<Record<string, any>>;
@@ -31,12 +31,27 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
 
   try {
     assert.equal(Number(services.db.get<{ total: number }>("SELECT COUNT(*) AS total FROM cdks")?.total || 0), 0);
-    const adapters = await json(await fetch(`${base}/adapters`));
+    const adaptersResponse = await fetch(`${base}/adapters`);
+    assert.equal(adaptersResponse.headers.get('cache-control'), 'no-store');
+    const adapters = await json(adaptersResponse);
     assert.equal(adapters.items.length, 21);
     for (const id of ['1panel', 'aapanel', 'bt-panel']) assert.equal(adapters.items.find((item: { id: string }) => item.id === id)?.category, '建站面板');
     for (const id of ['new-api', 'one-api', 'cliproxyapi']) assert.equal(adapters.items.find((item: { id: string }) => item.id === id)?.category, 'AI 面板');
     assert.ok(adapters.items.some((item: { id: string; capabilities: string[] }) => item.id === "3x-ui" && item.capabilities.includes("reality")));
     assert.ok(adapters.items.some((item: { id: string; kind: string }) => item.id === "docker" && item.kind === "tool"));
+    const publicCatalogKeys = ['id', 'name', 'kind', 'category', 'accent', 'version', 'memory', 'port', 'description', 'enabled', 'supportedSystems', 'operations', 'capabilities', 'requirements', 'form', 'steps'].sort();
+    for (const item of adapters.items) {
+      assert.deepEqual(Object.keys(item).sort(), publicCatalogKeys);
+      const detailResponse = await fetch(`${base}/adapters/${item.id}`);
+      assert.equal(detailResponse.headers.get('cache-control'), 'no-store');
+      assert.deepEqual((await json(detailResponse)).adapter, item);
+    }
+    const publicAi = adapters.items.find((item: { id: string }) => item.id === 'new-api');
+    assert.ok(publicAi.supportedSystems.includes('Debian 11+'));
+    assert.deepEqual(publicAi.requirements.autoInstallDependencies, ['Docker Engine', 'Docker Compose']);
+    for (const endpoint of ['settings', 'catalog', 'resources', 'jobs', 'backups', 'audit', 'security/report', 'update/status']) {
+      assert.equal((await fetch(`${base}/admin/${endpoint}`)).status, 401, `anonymous access to ${endpoint}`);
+    }
     const bootstrapState = await json(await fetch(`${base}/admin/bootstrap`));
     assert.equal(bootstrapState.required, true);
 
@@ -60,6 +75,9 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     assert.equal(noCsrf.status, 403);
 
     const adminHeaders = { cookie, "content-type": "application/json", "x-csrf-token": String(bootstrap.csrfToken) };
+    const adminCatalog = await json(await fetch(`${base}/admin/catalog?pageSize=100`, { headers: adminHeaders }));
+    assert.equal(adminCatalog.items.find((item: { id: string }) => item.id === 'new-api').supportLevel, 'pending');
+    assert.deepEqual(adminCatalog.items.find((item: { id: string }) => item.id === 'new-api').verifiedSystems, ['Debian 12 · amd64']);
     const updateStatus = await json(await fetch(`${base}/admin/update/status`, { headers: adminHeaders }));
     assert.equal(updateStatus.state.phase, "idle");
     const securityReport = await json(await fetch(`${base}/admin/security/report`, { headers: adminHeaders }));
@@ -83,6 +101,20 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
 
     const lockA = await fetch(`${base}/cdk/lock`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grantToken: grantA.grantToken, taskKey: "task-a" }) });
     assert.equal(lockA.status, 200);
+    const privateJob = services.jobEngine.createJob({ kind: 'boundary-check', serverKey: 'example.test:22', grantHash: sha256(grantA.grantToken), taskKey: 'task-a', steps: [{ key: 'verify', title: '验证服务' }], payload: { sshPassword: 'private-ssh-password' } });
+    await services.jobEngine.startJob(privateJob.id, async () => ({ accessUrl: 'https://example.test', password: 'private-panel-password', managementKey: 'private-management-key' }));
+    const ownJob = await json(await fetch(`${base}/jobs/${privateJob.id}?grantToken=${encodeURIComponent(grantA.grantToken)}`));
+    assert.equal(ownJob.job.status, 'succeeded');
+    assert.doesNotMatch(JSON.stringify(ownJob), /private-ssh-password|private-panel-password|private-management-key/);
+    for (const suffix of ['', '/events']) {
+      assert.equal((await fetch(`${base}/jobs/${privateJob.id}${suffix}`)).status, 404);
+      assert.equal((await fetch(`${base}/jobs/${privateJob.id}${suffix}?grantToken=${encodeURIComponent(grantB.grantToken)}`)).status, 404);
+    }
+    const otherJobs = await json(await fetch(`${base}/jobs?grantToken=${encodeURIComponent(grantB.grantToken)}`));
+    assert.equal(otherJobs.items.length, 0);
+    const resultRequest = (grantToken: string) => fetch(`${base}/jobs/${privateJob.id}/result`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ grantToken, taskKey: 'task-a' }) });
+    assert.equal((await resultRequest(grantB.grantToken)).status, 409);
+    assert.equal((await resultRequest(grantA.grantToken)).status, 200);
     const lockBWhileBusy = await fetch(`${base}/cdk/lock`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grantToken: grantB.grantToken, taskKey: "task-b" }) });
     assert.equal(lockBWhileBusy.status, 409);
 
@@ -109,6 +141,9 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     }));
     assert.equal(safeSettings.purchaseUrl, "https://shop.example/cdk");
     assert.equal(safeSettings.adminPath, "/private-console");
+    const publicConfig = await json(await fetch(`${base}/public/config`));
+    assert.equal('adminPath' in publicConfig, false);
+    assert.doesNotMatch(JSON.stringify(publicConfig), /private-console|password_hash|setup_token|panelark\.secret/);
     const buy = () => fetch(`${base}/public/purchase`, { redirect: "manual" });
     const firstPurchase = await buy(); assert.equal(firstPurchase.status, 302); assert.equal(firstPurchase.headers.get("location"), "https://shop.example/cdk"); assert.equal(firstPurchase.headers.get("cache-control"), "no-store");
     const changedLink = { ...safeSettings, purchaseUrl: "https://new-shop.example/new-cdk" };
@@ -148,6 +183,7 @@ test("PanelArk admin and CDK lifecycle is persistent, guarded and idempotent", a
     assert.equal(disableDocker.status, 200);
     const adaptersAfterDisable = await json(await fetch(`${base}/adapters`));
     assert.equal(adaptersAfterDisable.items.some((item: { id: string }) => item.id === "docker"), false);
+    assert.equal((await fetch(`${base}/adapters/docker`)).status, 404);
     await fetch(`${base}/admin/catalog/docker`, { method: "PUT", headers: adminHeaders, body: JSON.stringify({ enabled: true, sortOrder: 1 }) });
 
     const backup = await json(await fetch(`${base}/admin/backups`, {

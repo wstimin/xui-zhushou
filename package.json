@@ -1,7 +1,7 @@
 {
   "name": "xui-zhushou",
   "private": true,
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "PanelArk 面板方舟：面向多种 VPS 面板与工具的一键部署助手",
   "type": "module",
   "engines": {

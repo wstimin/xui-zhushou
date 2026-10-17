@@ -201,6 +201,19 @@ function catalogItems(db: PanelArkDatabase) {
   }).sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "zh-CN"));
 }
 
+// Public product information is an explicit allowlist, not a copy of internal
+// adapter metadata. Acceptance status and future internal fields stay server-side.
+function publicCatalogItem(item: ReturnType<typeof catalogItems>[number]) {
+  return {
+    id: item.id, name: item.name, kind: item.kind, category: item.category,
+    accent: item.accent, version: item.version, memory: item.memory,
+    port: item.port, description: item.description, enabled: item.enabled,
+    supportedSystems: item.supportedSystems, operations: item.operations,
+    capabilities: item.capabilities, requirements: item.requirements,
+    form: item.form, steps: item.steps,
+  };
+}
+
 export async function mountPanelArkApi(app: Express) {
   const dataDirectory = path.resolve(process.env.PANELARK_DATA_DIR || path.join(process.cwd(), "data"));
   const db = await PanelArkDatabase.open(path.join(dataDirectory, "panelark.sqlite"));
@@ -226,13 +239,15 @@ export async function mountPanelArkApi(app: Express) {
   router.get("/setup/status", (_req, res) => res.json(installationStatus(db, dataDirectory)));
 
   router.get("/adapters", (_req, res) => {
-    res.json({ success: true, items: catalogItems(db).filter(item => item.enabled) });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ success: true, items: catalogItems(db).filter(item => item.enabled).map(publicCatalogItem) });
   });
 
   router.get("/adapters/:id", (req, res) => {
     const adapter = catalogItems(db).find(item => item.id === text(req.params.id, 80) && item.enabled);
     if (!adapter) return res.status(404).json({ success: false, error: "面板适配器不存在或已下架" });
-    res.json({ success: true, adapter });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ success: true, adapter: publicCatalogItem(adapter) });
   });
 
   router.get("/resources", (_req, res) => {

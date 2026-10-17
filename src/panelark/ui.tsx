@@ -373,13 +373,12 @@ function CatalogCard({ item, deploymentUnlocked, serverConnected, onDeploy }: { 
     <article className="catalog-card glass-card">
       <div className="catalog-card-head">
         <span className={`product-icon ${item.accent}`}><Icon size={24} /></span>
-        <div className="status-stack">{item.featured && <span className="tag gold-tag">推荐</span>}{item.verifiedSystems?.length ? <span className="tag success-tag">部分系统已验收</span> : item.supportLevel === 'verified' ? <span className="tag success-tag">实机已验证</span> : item.supportLevel === 'pending' ? <span className="tag neutral-tag">待实机验收</span> : null}<span className={`tag ${item.installed ? 'success-tag' : 'neutral-tag'}`}>{item.installed ? '已安装' : '未安装'}</span></div>
+        <div className="status-stack">{item.featured && <span className="tag gold-tag">推荐</span>}{serverConnected && typeof item.installed === 'boolean' ? <span className={`tag ${item.installed ? 'success-tag' : 'neutral-tag'}`}>{item.installed ? '已安装' : '未安装'}</span> : null}</div>
       </div>
       <div className="catalog-card-copy"><span className="category-label">{item.category}</span><h3>{item.name}</h3><p>{item.description}</p></div>
       <div className="catalog-meta"><span><Code2 size={14} /> {item.version}</span><span><MemoryStick size={14} /> {item.memory}</span><span><Network size={14} /> {item.port}</span></div>
       <div className="catalog-requirements">
         {item.supportedSystems?.length ? <span><strong>适用系统</strong>{item.supportedSystems.join(' · ')}</span> : null}
-        {item.verifiedSystems?.length ? <span><strong>实机已测</strong>{item.verifiedSystems.join('、')}；其他系统待验收</span> : null}
         {requirements?.architectures?.length ? <span><strong>支持架构</strong>{requirements.architectures.join(' / ')}</span> : null}
         {requirements?.minDiskMb ? <span><strong>可用磁盘</strong>{requirements.minDiskMb >= 1024 ? `${requirements.minDiskMb / 1024} GB+` : `${requirements.minDiskMb} MB+`}</span> : null}
         {requirements?.systemd ? <span><strong>运行条件</strong>systemd · 可联网</span> : null}
@@ -670,7 +669,6 @@ export function DeployModal({ item, grantToken, server, onConsumed, onClose, onT
     requirements?.architectures?.length ? `架构：${requirements.architectures.join(' / ')}` : '',
     requirements?.systemd ? '需要 systemd' : '',
     requirements?.network ? '需要可访问互联网' : '',
-    item.verifiedSystems?.length ? `实测环境：${item.verifiedSystems.join('、')}，其他系统仍需验收` : '',
   ].filter(Boolean).join(' · ');
   const panelPort = Number(servicePort);
   const canTemporarilyStopConflict = Boolean(

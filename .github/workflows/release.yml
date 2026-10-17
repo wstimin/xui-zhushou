@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Baota, New API, One API and CLIProxyAPI passed live Debian 12 amd64 installation and authentication tests|Corrected Baota disk preflight and system inspection fields|Catalog now distinguishes tested systems from declared compatibility and rejects unsupported AI hosts"
+          PANELARK_RELEASE_NOTES: "Public catalog and deployment pages now show product requirements without internal acceptance labels|Public adapter APIs use an explicit field allowlist while admin metadata stays protected|Removed fabricated installation badges and added public information boundary regression checks"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

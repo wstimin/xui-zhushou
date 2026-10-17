@@ -142,8 +142,6 @@ export interface PanelAdapterMetadata {
   port: string;
   description: string;
   enabled: boolean;
-  supportLevel: 'verified' | 'pending';
-  verifiedSystems?: string[];
   supportedSystems: string[];
   operations: Array<'install' | 'create-node' | 'get-tls'>;
   capabilities: string[];

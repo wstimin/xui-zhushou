@@ -609,7 +609,7 @@ class CatalogAdapter implements PanelAdapter {
           ? `${this.definition.accessProtocol || "http"}://${host}:${port}`
           : undefined;
         const extra = this.definition.result?.(payload, host, verification) || {};
-        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification: this.definition.sensitiveVerification ? "服务与 HTTP 验证通过" : verification, supportLevel: this.metadata.supportLevel, supportedSystems: this.metadata.supportedSystems, ...extra };
+        return { adapterId: this.metadata.id, id: `${this.metadata.id}-${Date.now()}`, name: this.metadata.name, host, accessUrl, verification: this.definition.sensitiveVerification ? "服务与 HTTP 验证通过" : verification, supportedSystems: this.metadata.supportedSystems, ...extra };
       });
     } finally {
       if (ownsSession) session?.client.end?.();
