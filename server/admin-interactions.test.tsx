@@ -46,7 +46,11 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
   const document = dom.window.document;
   const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
   const click = async (text: string, scope: ParentNode = document) => {
-    const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === text);
+    let button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === text);
+    if (!button) {
+      const more = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === '更多');
+      if (more) { await act(async()=>more.click()); await settle(); button=[...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(item=>item.textContent?.trim()===text); }
+    }
     assert.ok(button, `button ${text} exists`); assert.equal(button.disabled, false, text);
     await act(async () => { button.click(); }); await settle();
   };
@@ -55,6 +59,9 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
   const updates = () => requests.filter(item => ['/update/prepare', '/update/apply'].includes(item.path));
   try {
     await act(async () => { root.render(<AdminApp />); }); await settle();
+    const overviewNotes=document.querySelector<HTMLDetailsElement>('.admin-overview-notes')!;
+    assert.ok(overviewNotes); assert.equal(overviewNotes.open,false);
+    await act(async()=>overviewNotes.querySelector('summary')!.click()); assert.equal(overviewNotes.open,true);
     assert.equal(document.documentElement.dataset.theme, 'light');
     await click('暗色模式'); assert.equal(document.documentElement.dataset.theme, 'dark'); assert.equal(dom.window.localStorage.getItem('panelark-theme'), 'dark');
     await click('任务售后');
@@ -78,6 +85,9 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(requests.filter(item => item.path === '/backups' && item.method === 'POST').length, 0);
     await click('系统更新'); await click('检测更新');
+    const disclosures=[...document.querySelectorAll<HTMLDetailsElement>('.admin-disclosure')];
+    assert.equal(disclosures.length,2);
+    for(const disclosure of disclosures){assert.equal(disclosure.open,false);await act(async()=>disclosure.querySelector('summary')!.click());assert.equal(disclosure.open,true);}
     assert.doesNotMatch(document.body.textContent!, /测试通道/);
     assert.deepEqual(requests.find(item => item.path === '/update/check')?.body, { channel: 'stable' });
     assert.equal(document.querySelector('.progress-track.large'), null);

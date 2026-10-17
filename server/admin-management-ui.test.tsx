@@ -31,7 +31,11 @@ test('admin pages drive real HTTP and database CRUD, including task after-sales'
   const waitFor = async (condition: () => boolean) => { for (let i = 0; i < 100 && !condition(); i++) await settle(); assert.ok(condition(), document.body.textContent?.slice(-1500)); };
   const dialog = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].at(-1)!;
   const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label);
-  const click = async (label: string, scope: ParentNode = document) => { const node = button(label, scope); assert.ok(node, `button ${label} exists`); assert.equal(node.disabled, false, label); await act(async () => node.click()); await settle(); };
+  const click = async (label: string, scope: ParentNode = document) => {
+    let node = button(label, scope);
+    if (!node && button('更多',scope)) { await act(async()=>button('更多',scope)!.click()); await settle(); node=button(label,document.querySelector('[role="menu"]')!); }
+    assert.ok(node, `button ${label} exists`); assert.equal(node.disabled, false, label); await act(async () => node.click()); await settle();
+  };
   const dismiss = async () => { await waitFor(() => Boolean(button('知道了', dialog()))); await click('知道了', dialog()); };
   const fill = async (label: string, value: string, scope: ParentNode = dialog()) => {
     const field = [...scope.querySelectorAll('label')].find(node => node.querySelector('span')?.textContent === label)?.querySelector('input,select') as HTMLInputElement | HTMLSelectElement;
@@ -68,7 +72,7 @@ test('admin pages drive real HTTP and database CRUD, including task after-sales'
     await click('编辑推荐'); await fill('类型', 'domain'); await fill('说明', '修改后的说明'); await click('保存', dialog()); await dismiss(); assert.equal(db.get('SELECT description FROM recommended_resources WHERE id=?', [resource.id])!.description, '修改后的说明');
     await click('删除'); await click('确认', dialog()); await dismiss(); assert.equal(db.get('SELECT id FROM recommended_resources WHERE id=?', [resource.id]), undefined);
 
-    await click('CDK 管理'); await waitFor(() => Boolean(button('编辑套餐'))); await click('编辑套餐'); await fill('套餐名称', '正式套餐'); await fill('最多部署次数', '8'); await fill('有效天数（0 为永久）', '0'); await click('保存', dialog()); await dismiss(); assert.equal(db.get("SELECT max_uses FROM cdk_packages WHERE name='正式套餐'")!.max_uses, 8);
+    await click('CDK 管理'); await click('套餐管理'); await waitFor(() => Boolean(button('编辑套餐'))); await click('编辑套餐'); await fill('套餐名称', '正式套餐'); await fill('最多部署次数', '8'); await fill('有效天数（0 为永久）', '0'); await click('保存', dialog()); await dismiss(); assert.equal(db.get("SELECT max_uses FROM cdk_packages WHERE name='正式套餐'")!.max_uses, 8);
     await click('目录运营'); await waitFor(() => Boolean(button('编辑项目'))); const item = db.get('SELECT adapter_id FROM catalog_overrides LIMIT 1'); assert.equal(item, undefined);
     await click('编辑项目'); await fill('项目名称', '正式展示名称'); await fill('排序（0—10000）', '0'); await click('保存', dialog()); await dismiss(); assert.equal(db.get("SELECT sort_order FROM catalog_overrides WHERE name='正式展示名称'")!.sort_order, 0);
 

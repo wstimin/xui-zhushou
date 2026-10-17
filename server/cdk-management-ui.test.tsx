@@ -39,7 +39,11 @@ test('CDK management UI reveals, copies, exports, edits and confirms single and 
   const document = dom.window.document;
   const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
   const click = async (label: string, scope: ParentNode = document) => {
-    const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === label);
+    let button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === label);
+    if (!button) {
+      const more=[...scope.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='更多');
+      if(more){await act(async()=>more.click());await settle();button=[...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(button=>button.textContent?.trim()===label);}
+    }
     assert.ok(button, label); assert.equal(button.disabled, false, label); await act(async () => button.click()); await settle();
   };
   const row = () => document.querySelector('tbody tr')!;
