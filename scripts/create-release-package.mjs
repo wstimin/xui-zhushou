@@ -4,6 +4,11 @@ import process from "node:process";
 
 const root = process.cwd();
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+const catalog = JSON.parse(fs.readFileSync(path.join(root, 'config', 'adapter-catalog.json'), 'utf8'));
+if ([lock.version, lock.packages?.['']?.version, catalog.version].some(version => version !== packageJson.version)) {
+  throw new Error('Release versions must match in package.json, package-lock.json and config/adapter-catalog.json before packaging');
+}
 const outputDir = path.join(root, "release", "package");
 const requiredFiles = [
   ".env.example",

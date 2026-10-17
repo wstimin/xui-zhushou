@@ -13,6 +13,12 @@ const installer = readFileSync(new URL("../install.sh", import.meta.url), "utf8"
 const updateRunner = readFileSync(new URL("../scripts/apply-update.mjs", import.meta.url), "utf8");
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
+test('release version is synchronized before builds and manifest signing', () => {
+  const json = (file: string) => JSON.parse(readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'));
+  const pkg = json('package.json'), lock = json('package-lock.json'), catalog = json('config/adapter-catalog.json');
+  assert.equal(lock.version, pkg.version); assert.equal(lock.packages[''].version, pkg.version); assert.equal(catalog.version, pkg.version);
+});
+
 test("PM2 reads the release version instead of inheriting a previous updater version", () => {
   const previous = process.env.APP_VERSION;
   process.env.APP_VERSION = "0.0.1-stale";
