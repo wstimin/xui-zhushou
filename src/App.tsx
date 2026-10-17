@@ -1,24 +1,23 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { adapterMetadataToCatalog, panels, tools } from './panelark/catalog';
-import { defaultPublicConfig, getPublicConfig, listPanelAdapters, listRecommendedResources, openRecommendedResource, type CdkGrant, type PublicConfig, type RecommendedResource } from './panelark/api';
+import { defaultPublicConfig, getPublicConfig, listPanelAdapters, listRecommendedResources, type CdkGrant, type PublicConfig, type RecommendedResource } from './panelark/api';
 import type { ActiveServer, CatalogItem, ServerDraft, View } from './panelark/types';
 import { useTheme } from './panelark/theme';
 import {
-  AboutPage,
   CatalogPage,
   CdkGateModal,
   DeployModal,
   DocsPage,
   Footer,
   Header,
-  HomePage,
+  ResourcesPage,
   ServerConnectModal,
 } from './panelark/ui';
 
 export default function App() {
   const [theme, toggleTheme] = useTheme();
-  const [view, setView] = useState<View>('home');
+  const [view, setView] = useState<View>('deploy');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [deploymentUnlocked, setDeploymentUnlocked] = useState(false);
   const [cdkGrant, setCdkGrant] = useState<CdkGrant | null>(null);
@@ -74,13 +73,6 @@ export default function App() {
     listRecommendedResources().then(response => setRecommendedResources(response.items)).catch(() => undefined);
   }, []);
 
-  const openResource = async (id: string) => {
-    try {
-      const { url } = await openRecommendedResource(id);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch { setToast('推荐资源暂时不可用'); }
-  };
-
   const requestConnection = () => {
     if (!deploymentUnlocked) {
       setCdkModalOpen(true);
@@ -116,6 +108,7 @@ export default function App() {
 
   const handleServerConnected = (server: ActiveServer) => {
     setActiveServer(server);
+    setServerDraft(current => ({ ...current, password: '', privateKey: '' }));
     setServerModalOpen(false);
     setView('deploy');
     setToast('服务器检测完成，请选择需要安装的面板');
@@ -142,23 +135,6 @@ export default function App() {
       />
 
       <main className="main-content">
-        {view === 'home' && (
-          <HomePage
-            catalogItems={catalogPanels}
-            recommendedResources={recommendedResources}
-            onOpenResource={openResource}
-            deploymentUnlocked={deploymentUnlocked}
-            serverConnected={serverConnected}
-            serverEnvironment={activeServer?.environment}
-            onStart={() => requestDeploy()}
-            purchaseEnabled={publicConfig.purchaseEnabled}
-            purchaseButtonText={publicConfig.purchaseButtonText}
-            onOpenDocs={() => setView('docs')}
-            onViewPanels={() => setView('deploy')}
-            onConnect={requestConnection}
-            onToast={setToast}
-          />
-        )}
         {view === 'deploy' && (
           <CatalogPage
             items={catalogPanels}
@@ -166,10 +142,11 @@ export default function App() {
             purchaseEnabled={publicConfig.purchaseEnabled}
             purchaseButtonText={publicConfig.purchaseButtonText}
             eyebrow="Panel catalog"
-            description="可先浏览面板目录；正式部署必须依次完成 CDK 验证和服务器检测，之后再选择面板。"
+            description="填写服务器信息，选择需要的面板，系统自动完成检测、依赖安装与部署，等待领取登录信息即可。"
             deploymentUnlocked={deploymentUnlocked}
             serverConnected={serverConnected}
             serverEnvironment={activeServer?.environment}
+            cdkGrant={cdkGrant}
             onDeploy={requestDeploy}
             onConnect={requestConnection}
           />
@@ -185,12 +162,13 @@ export default function App() {
             deploymentUnlocked={deploymentUnlocked}
             serverConnected={serverConnected}
             serverEnvironment={activeServer?.environment}
+            cdkGrant={cdkGrant}
             onDeploy={requestDeploy}
             onConnect={requestConnection}
           />
         )}
         {view === 'docs' && <DocsPage onStart={() => requestDeploy()} />}
-        {view === 'about' && <AboutPage onViewPanels={() => setView('deploy')} />}
+        {view === 'resources' && <ResourcesPage items={recommendedResources} />}
       </main>
 
       <Footer onNavigate={setView} />
@@ -210,9 +188,10 @@ export default function App() {
           draft={serverDraft}
           onDraftChange={setServerDraft}
           grantToken={cdkGrant?.grantToken || ''}
+          cdkGrant={cdkGrant}
         />
       )}
-      {deployTarget && cdkGrant && activeServer && <DeployModal item={deployTarget} grantToken={cdkGrant.grantToken} server={activeServer} onConsumed={() => setDeploymentUnlocked(false)} onClose={() => { setDeployTarget(null); if (!deploymentUnlocked) { setCdkGrant(null); setActiveServer(null); } }} onToast={setToast} />}
+      {deployTarget && cdkGrant && activeServer && <DeployModal item={deployTarget} grantToken={cdkGrant.grantToken} server={activeServer} onConsumed={() => setDeploymentUnlocked(false)} onClose={() => { setDeployTarget(null); setCdkGrant(null); setActiveServer(null); setDeploymentUnlocked(false); }} onToast={setToast} />}
 
       {toast && <div className="toast" role="status"><CheckCircle2 size={18} /><span>{toast}</span></div>}
     </div>

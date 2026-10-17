@@ -198,9 +198,8 @@ export function adapterMetadataToCatalog(items: PanelAdapterMetadata[]): Catalog
 }
 
 export const navItems: Array<{ id: View; label: string }> = [
-  { id: 'home', label: '首页' },
   { id: 'deploy', label: '面板部署' },
   { id: 'tools', label: '工具箱' },
-  { id: 'docs', label: '文档' },
-  { id: 'about', label: '关于' },
+  { id: 'docs', label: '部署文档' },
+  { id: 'resources', label: '资源推荐' },
 ];

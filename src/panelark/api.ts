@@ -22,6 +22,9 @@ export interface CdkGrant {
   grantToken: string;
   packageName: string;
   remaining: number;
+  totalUses?: number;
+  usedCount?: number;
+  lockedCount?: number;
   expiresInMinutes: number;
 }
 
@@ -130,6 +133,10 @@ export interface DeploymentJobEvent {
   payload: Record<string, unknown>;
   createdAt: string;
 }
+
+export interface CurrentDeployment { success: true; job: DeploymentJob | null; result?: Record<string, unknown>; usage?: Pick<CdkGrant, 'totalUses' | 'usedCount' | 'remaining' | 'lockedCount'> }
+export function getCurrentDeployment(receipt: string) { return request<CurrentDeployment>('/api/deployment/current', { headers: { 'x-panelark-delivery': receipt } }); }
+export function acknowledgeDeployment(jobId: string, receipt: string) { return request<{ success: true }>('/api/deployment/current/acknowledge', { method: 'POST', headers: { 'x-panelark-result': jobId, 'x-panelark-delivery': receipt }, body: '{}' }); }
 
 export interface PanelAdapterMetadata {
   id: string;
@@ -270,7 +277,7 @@ export async function createDeploymentJob(grantToken: string, taskKey: string, i
   maxAttempts?: number;
   payload?: Record<string, unknown>;
 }) {
-  return request<{ success: true; job: DeploymentJob }>('/api/jobs', {
+  return request<{ success: true; job: DeploymentJob; receipt?: string }>('/api/jobs', {
     method: 'POST', body: JSON.stringify({ grantToken, taskKey, ...input }),
   });
 }

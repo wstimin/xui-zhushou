@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AdminAccess } from '../src/admin/AdminApp.js';
 import { AdminApiError, adminApi, allPackageOptions } from '../src/admin/api.js';
 import { PurchaseLink } from '../src/panelark/PurchaseLink.js';
-import { CatalogPage, CdkGateModal, DeployModal, Header, HomePage } from '../src/panelark/ui.js';
+import { CatalogPage, CdkGateModal, DeployModal, Header, ResourcesPage } from '../src/panelark/ui.js';
 import { ThemeToggle, resolveInitialTheme } from '../src/panelark/theme.js';
 import { getPublicConfig } from '../src/panelark/api.js';
 import { PanelArkMark } from '../src/components/PanelArkMark.js';
@@ -32,13 +32,14 @@ test('public catalog and deployment confirmation show requirements but never int
   const items = panels.map(item => ({ ...item, supportLevel: 'pending', verifiedSystems: ['internal-test-system'] }));
   const html = renderToStaticMarkup(<CatalogPage items={items} title="面板目录" eyebrow="Catalog" description="test" deploymentUnlocked={false} serverConnected={false} purchaseEnabled={false} purchaseButtonText="购买 CDK" onDeploy={noop} onConnect={noop} />);
   const confirmation = renderToStaticMarkup(<DeployModal item={items.find(item => item.id === 'new-api')!} grantToken="test-grant" server={{ sessionId: 'test-session', environment: { targetHost: 'example.test', sshPort: 22 } } as ActiveServer} onConsumed={noop} onClose={noop} onToast={noop} />);
-  for (const surface of [html, confirmation]) {
+  for (const surface of [html]) {
     assert.doesNotMatch(surface, /验收|实机已测|实机已验证|实测环境|internal-test-system/);
     assert.match(surface, /Ubuntu 20.04\+/);
     assert.match(surface, /Debian 11\+/);
     assert.match(surface, /amd64/);
     assert.match(surface, /systemd/);
   }
+  assert.doesNotMatch(confirmation, /验收|实测环境|internal-test-system|检查端口并准备安装|我已检查安全组/);
   assert.match(html, /无需手工准备/);
   assert.match(html, /Docker Engine \+ Docker Compose/);
   assert.match(html, /可用磁盘/);
@@ -61,7 +62,7 @@ test('all brand surfaces use the shared PanelArk symbol and favicon', () => {
   assert.match(symbol, /viewBox="0 0 24 24"/);
   assert.match(symbol, /fill-rule="evenodd"/);
 
-  const header = renderToStaticMarkup(<Header theme="light" view="home" mobileMenuOpen={false} deploymentUnlocked={false} serverConnected={false} onToggleTheme={noop} onToggleMenu={noop} onViewChange={noop} onConnect={noop} purchaseEnabled={false} purchaseButtonText="购买 CDK" />);
+  const header = renderToStaticMarkup(<Header theme="light" view="deploy" mobileMenuOpen={false} deploymentUnlocked={false} serverConnected={false} onToggleTheme={noop} onToggleMenu={noop} onViewChange={noop} onConnect={noop} purchaseEnabled={false} purchaseButtonText="购买 CDK" />);
   const admin = renderToStaticMarkup(<AdminAccess mode="login" theme="dark" onToggleTheme={noop} notice={null} setNotice={noop} onAuthenticated={noop} />);
   for (const surface of [header, admin]) {
     assert.match(surface, /data-panelark-mark=""/);
@@ -120,16 +121,23 @@ test('purchase links use a normal browser anchor to a fresh server redirect, and
   assert.match(html, /购买授权/); assert.equal(renderToStaticMarkup(<PurchaseLink enabled={false} />), '');
 });
 
-test('header, homepage, catalog and CDK modal all provide a purchase entry', () => {
+test('only the CDK verification rows provide purchase entries; header has no home or about', () => {
   const common = { deploymentUnlocked: false, serverConnected: false, purchaseEnabled: true, purchaseButtonText: '购买 CDK' };
   const views = [
-    <Header {...common} theme="light" view="home" mobileMenuOpen={false} onToggleTheme={noop} onToggleMenu={noop} onViewChange={noop} onConnect={noop} />,
-    <HomePage {...common} recommendedResources={[]} onOpenResource={noop} onStart={noop} onOpenDocs={noop} onViewPanels={noop} onConnect={noop} onToast={noop} />,
     <CatalogPage {...common} items={[]} title="面板目录" eyebrow="Catalog" description="test" onDeploy={noop} onConnect={noop} />,
     <CdkGateModal purchaseEnabled purchaseButtonText="购买 CDK" onClose={noop} onVerified={noop} />,
   ];
+  const header = renderToStaticMarkup(<Header {...common} theme="light" view="deploy" mobileMenuOpen={false} onToggleTheme={noop} onToggleMenu={noop} onViewChange={noop} onConnect={noop} />);
+  assert.doesNotMatch(header, /public\/purchase|首页|关于/); assert.match(header, /部署文档/); assert.match(header, /资源推荐/);
   for (const view of views) assert.match(renderToStaticMarkup(view), /href="\/api\/public\/purchase"/);
   assert.doesNotMatch(renderToStaticMarkup(<CatalogPage {...common} purchaseEnabled={false} items={[]} title="目录" eyebrow="Catalog" description="test" onDeploy={noop} onConnect={noop} />), /href="\/api\/public\/purchase"/);
+});
+
+test('recommended resources have an independent section and no demonstration entries', () => {
+  const empty = renderToStaticMarkup(<ResourcesPage items={[]} />);
+  assert.match(empty, /暂无推荐资源/); assert.doesNotMatch(empty, /全球 VPS|域名与 DNS/);
+  const listed = renderToStaticMarkup(<ResourcesPage items={[{ id: 'real', type: 'vps', title: '正式资源', description: '说明', badge: '', url: 'https://example.test', sort_order: 0 }]} />);
+  assert.match(listed, /\/api\/resources\/real\/open/);
 });
 
 test('theme controls offer both directions and default safely outside the browser', () => {

@@ -102,6 +102,23 @@ function marzbanInstallCommand() {
   ].join("; ");
 }
 
+function hiddifyInstallCommand(payload: Record<string, any>) {
+  const official = 'bash -c "$(curl -fLsS https://i.hiddify.com/release)"';
+  if (!payload.autoDeploy) return official;
+  // The official wrapper opens its terminal menu after finishing; stop only that
+  // installer process group once its completion marker and service are verified.
+  return [
+    'install_log=$(mktemp)',
+    `setsid bash -c ${shellQuote(official)} </dev/null >"$install_log" 2>&1 & installer_pid=$!`,
+    `trap 'kill -TERM -- -"$installer_pid" 2>/dev/null || true; rm -f "$install_log"' EXIT`,
+    'ready=0',
+    `for attempt in $(seq 1 220); do if grep -q 'Finished!.*Thank you' "$install_log" && systemctl is-active --quiet hiddify-panel && test -s /opt/hiddify-manager/data/current.json; then ready=1; break; fi; if ! kill -0 "$installer_pid" 2>/dev/null; then wait "$installer_pid"; code=$?; tail -n 80 "$install_log"; test "$code" = 0 && systemctl is-active --quiet hiddify-panel && test -s /opt/hiddify-manager/data/current.json; exit $?; fi; sleep 5; done`,
+    'if test "$ready" != 1; then tail -n 80 "$install_log"; exit 1; fi',
+    'kill -TERM -- -"$installer_pid" 2>/dev/null || true',
+    'wait "$installer_pid" 2>/dev/null || true',
+  ].join('; ');
+}
+
 function onePanelInstallCommand(payload: Record<string, any>) {
   const port = validPort(payload.servicePort, 10086);
   const requestedUsername = optionalString(payload.panelUsername);
@@ -317,11 +334,11 @@ const definitions: CatalogAdapterDefinition[] = [
   },
   {
     metadata: metadata({ ...panelBase, id: "hiddify", name: "Hiddify Manager", category: "代理面板", accent: "violet", version: "Stable", memory: "1 GB+", port: "443", description: "面向多协议代理和订阅管理的统一面板。", supportedSystems: ["Ubuntu 22.04"], requirements: { os: ["ubuntu"], minRamMb: 1024, systemd: true, network: true } }),
-    installCommand: "bash -c \"$(curl -fLsS https://i.hiddify.com/release)\"",
+    installCommand: payload => hiddifyInstallCommand(payload),
     verifyCommand: "systemctl is-active hiddify-panel",
     verifyOutput: /^active/m,
     accessProtocol: "https",
-    requiredCommands: ["bash", "curl", "systemctl"],
+    requiredCommands: ["bash", "curl", "systemctl", "setsid"],
     compatibility: environment => String(environment.osId || "").toLowerCase() === "ubuntu" && String(environment.osVersion || "").startsWith("22.04") ? undefined : "Hiddify Manager 当前仅允许安装到 Ubuntu 22.04 干净系统",
   },
   {
@@ -396,7 +413,7 @@ const definitions: CatalogAdapterDefinition[] = [
   },
   {
     metadata: metadata({ ...panelBase, id: "npm", name: "Nginx Proxy Manager", category: "Docker 面板", accent: "sage", version: "Latest", memory: "1 GB+", port: "81", description: "通过 Web 界面管理反向代理、证书和访问策略。", supportedSystems: ["Ubuntu/Debian", "RHEL family"], requirements: { os: ["linux"], minRamMb: 1024, systemd: true, network: true, architectures: ["amd64", "arm64"], autoInstallDependencies: ["Docker Engine", "Docker Compose"] }, capabilities: ["ssh-install", "docker", "proxy", "certificate"] }),
-    installCommand: persistentContainer("npm", "docker volume create npm_data >/dev/null && docker volume create npm_letsencrypt >/dev/null && docker run -d --name npm --restart=always -p 80:80 -p 81:81 -p 443:443 -v npm_data:/data -v npm_letsencrypt:/etc/letsencrypt jc21/nginx-proxy-manager:latest"),
+    installCommand: payload => persistentContainer("npm", `docker volume create npm_data >/dev/null && docker volume create npm_letsencrypt >/dev/null && docker run -d --name npm --restart=always -p 80:80 -p 81:81 -p 443:443 ${payload.__automaticCredentials ? `-e ${shellQuote(`INITIAL_ADMIN_EMAIL=${payload.__automaticCredentials.username}`)} -e ${shellQuote(`INITIAL_ADMIN_PASSWORD=${payload.__automaticCredentials.password}`)}` : ''} -v npm_data:/data -v npm_letsencrypt:/etc/letsencrypt jc21/nginx-proxy-manager:latest`),
     verifyCommand: "docker ps --format '{{.Names}}' | grep -E '^npm$'",
     verifyOutput: /npm/m,
     accessProtocol: "http",
@@ -624,4 +641,7 @@ export function registerCatalogAdapters(dependencies?: CatalogAdapterDependencie
 
 export function getCatalogAdapterDefinitions() {
   return definitions.map(definition => definition.metadata);
+}
+export function catalogCompatibility(id: string, environment: Record<string, any>) {
+  return definitions.find(definition => definition.metadata.id === id)?.compatibility?.(environment);
 }

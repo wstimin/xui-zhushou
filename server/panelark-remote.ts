@@ -183,14 +183,14 @@ function bestEffortPrivilegedShell(command: string, details: { isRoot: boolean; 
   return details.isRoot ? command : details.canSudo ? `sudo -n sh -c ${shellQuote(command)}` : command;
 }
 
-function dependencyCheckCommand() {
+export function dependencyCheckCommand() {
   return dependencyDefinitions.map(item => {
     const key = item.id.replace(/-/g, "_").toUpperCase();
     return `printf '__DEP_${key}__='; if ${item.check}; then echo yes; else echo no; fi`;
   }).join("; ");
 }
 
-function firewallCheckCommand() {
+export function firewallCheckCommand() {
   return [
     "if command -v ufw >/dev/null; then fw=ufw; elif command -v firewall-cmd >/dev/null; then fw=firewalld; elif command -v nft >/dev/null; then fw=nftables; elif command -v iptables >/dev/null; then fw=iptables; else fw=none; fi; printf '__FIREWALL__=%s\\n' \"$fw\"",
     "printf '__FIREWALL_ACTIVE__='; if [ \"$fw\" = ufw ]; then ufw status 2>/dev/null | grep -qi '^Status: active' && echo yes || echo no; elif [ \"$fw\" = firewalld ]; then firewall-cmd --state 2>/dev/null | grep -q running && echo yes || echo no; elif [ \"$fw\" = nftables ]; then nft list ruleset 2>/dev/null | grep -q 'hook input' && echo yes || echo no; elif [ \"$fw\" = iptables ]; then iptables -S INPUT 2>/dev/null | grep -qv -- '-P INPUT ACCEPT' && echo yes || echo no; else echo no; fi",
@@ -206,12 +206,12 @@ function dockerCheckCommand() {
   ].join("; ");
 }
 
-function portScanCommand(ports: number[]) {
+export function portScanCommand(ports: number[]) {
   const list = ports.join(" ");
   return `for p in ${list}; do line=$(ss -H -ltnp 2>/dev/null | awk -v needle=\":$p\" '$4 ~ needle\"$\" {print; exit}'); printf '__PORT__=%s|%s\\n' \"$p\" \"$line\"; done`;
 }
 
-async function canUseSudo(session: SshSession) {
+export async function canUseSudo(session: SshSession) {
   if (session.user === "root") return true;
   const result = await execSsh(session.client, "sudo -n true", { timeoutMs: 8_000 });
   return result.code === 0;
@@ -468,5 +468,12 @@ export function mountPanelArkRemoteApi(router: Router, db: PanelArkDatabase) {
   // Adapter jobs may reuse the already-confirmed SSH channel without ever
   // serializing the user's password or private key into the job database.
   const getSshSession = (grantToken: unknown, sessionId: unknown) => getSession(grantToken, sessionId).ssh;
-  return { getSshSession };
+  const disconnect = (grantToken: unknown, sessionId: unknown) => removeSession(getSessionForDisconnect(grantToken, sessionId).id);
+  const retain = (grantToken: unknown, sessionId: unknown) => {
+    const session = getSession(grantToken, sessionId);
+    const timer = setInterval(() => { if (sessions.has(session.id)) touchSession(session); }, 30_000);
+    timer.unref();
+    return () => clearInterval(timer);
+  };
+  return { getSshSession, disconnect, retain };
 }

@@ -126,7 +126,18 @@ button,input,textarea{color:inherit;font:inherit} button{border:0;cursor:pointer
 .cdk-management .cdk-danger{color:var(--danger)}.cdk-management button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .cdk-management button:not(:disabled):active{transform:scale(.97)}.cdk-management button{transition:transform 120ms cubic-bezier(.23,1,.32,1)}
 .cdk-management button:focus-visible:active{transform:none}
+.connection-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.connection-card .connection-actions .purchase-button{min-height:36px;padding:8px 12px;font-size:12px;white-space:nowrap}
+.automatic-fields{border:0;padding:0;margin:0;min-width:0}.automatic-fields:disabled{opacity:.65}
+.automatic-deploy-modal .automatic-step{display:flex;align-items:center;gap:10px;padding:10px 0;color:var(--text-secondary);font-size:13px}.automatic-deploy-modal .automatic-step svg{color:var(--accent)}
+.automatic-deploy-modal .running-top>span{display:flex;align-items:center;gap:8px}.delivery-retention-note{padding:14px 16px;border:1px solid var(--border-strong);border-radius:12px;background:var(--accent-soft);color:var(--text-primary);line-height:1.8}
+.automatic-deploy-modal .result-row strong{user-select:text;overflow-wrap:anywhere;white-space:pre-wrap}.automatic-deploy-modal .modal-actions{flex-wrap:wrap}
+.resources-page .resource-card a{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;color:var(--accent);border:1px solid var(--border);flex-shrink:0}.resources-page .resource-grid{margin-bottom:40px}
+.docs-nav a{display:block;padding:11px 13px;border-radius:9px;color:var(--text-secondary);font-size:13px;text-decoration:none}.docs-nav a:hover,.docs-nav a:focus-visible{color:var(--accent);background:var(--accent-soft)}.docs-content h2[id]{scroll-margin-top:110px}
+@media(max-width:560px){.connection-card{flex-wrap:wrap}.connection-actions{width:100%;justify-content:flex-end}.catalog-access-actions .connection-card{min-width:0}.automatic-deploy-modal .result-row{grid-template-columns:90px minmax(0,1fr) auto}}
 .cdk-edit-form .admin-field{margin-bottom:16px}.cdk-edit-form .admin-field small{line-height:1.7;color:var(--text-secondary)}
 @media(max-width:1200px){.cdk-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.cdk-list-heading{padding:18px}.cdk-filters{padding:0 18px 18px;grid-template-columns:1fr 1fr}.cdk-filters .admin-field:first-child{grid-column:1/-1}.cdk-toolbar{padding:14px 18px}.cdk-toolbar-divider{display:none}}
 @media(prefers-reduced-motion:reduce){.cdk-management button:not(:disabled):active{transform:none}.cdk-management button{transition:none}}
+.cdk-usage{color:var(--text-secondary);font-size:.82rem;line-height:1.7;padding:.65rem .9rem;border:1px solid var(--border);border-radius:12px;background:var(--bg-elevated);margin-top:.65rem}
+.catalog-access-actions{display:grid;justify-items:stretch;gap:0;min-width:0}.catalog-access-actions .connection-card{min-width:0}.catalog-access-actions .cdk-usage{max-width:480px}.automatic-deploy-modal .result-row>strong{font-size:13px}.automatic-deploy-modal .result-row>span{font-size:12px}.automatic-deploy-modal .button:active{transform:scale(.97)}
+@media(max-width:560px){.connection-card{grid-template-columns:auto minmax(0,1fr)}.connection-card .connection-actions{grid-column:1/-1;flex-wrap:nowrap;justify-content:flex-end}.catalog-access-actions{width:100%}}

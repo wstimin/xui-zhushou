@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { ServerEnvironment } from './api';
 
 export type Theme = 'light' | 'dark';
-export type View = 'home' | 'deploy' | 'tools' | 'docs' | 'about';
+export type View = 'deploy' | 'tools' | 'docs' | 'resources';
 export type CatalogKind = 'panel' | 'tool';
 export type Accent = 'gold' | 'sage' | 'blue' | 'rose' | 'violet';
 

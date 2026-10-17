@@ -10,6 +10,7 @@ import { attachJobSse, PanelArkJobEngine } from "./panelark-jobs.js";
 import { getPanelAdapter, getPanelAdapterSteps, listPanelAdapters, PanelAdapterOperation } from "./panel-adapters.js";
 import { registerCatalogAdapters } from "./catalog-adapters.js";
 import { encryptCdkCode, mountCdkManagement } from "./cdk-management.js";
+import { automaticFinalSteps, automaticSteps, executeAutomaticDeployment } from './automatic-deployment.js';
 import { backupFilePath, backupLimits, backupPassphraseForRecord, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup, saveManagedBackup } from "./panelark-backup.js";
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
@@ -224,11 +225,17 @@ export async function mountPanelArkApi(app: Express) {
   const jobEngine = new PanelArkJobEngine(db);
   const updateManager = new PanelArkUpdateManager(db, dataDirectory, loadUpdatePublicKey(dataDirectory));
   registerCatalogAdapters();
-  // Secrets are deliberately kept only in this process. The persisted job payload
-  // is redacted by PanelArkJobEngine, so a restart turns an unfinished deployment
-  // into a manual-recovery job instead of writing SSH or panel credentials to disk.
+  // Both the receipt and plaintext delivery live only in memory, never cookies or storage.
   const adapterExecutions = new Map<string, { adapterId: string; operation: PanelAdapterOperation; payload: Record<string, any> }>();
   const adapterResults = new Map<string, unknown>();
+  const deliveries = new Map<string, { job_id: string; result?: Record<string, unknown>; touched: number }>();
+  // A queued automatic task cannot resume after a process restart without its SSH session.
+  for (const row of db.all("SELECT id, grant_hash FROM deployment_jobs WHERE status IN ('queued','interrupted') AND json_extract(payload_json, '$.autoDeploy') = 1")) {
+    db.transaction(() => {
+      db.run("UPDATE deployment_jobs SET status = 'interrupted', recovery_status = 'manual', error_message = '服务重启中断了安装，请先检查目标服务器后重试' WHERE id = ?", [row.id]);
+      db.run("UPDATE cdk_grants SET status = 'released', released_at = ? WHERE token_hash = ? AND status = 'locked'", [now(), row.grant_hash]);
+    });
+  }
 
   const router = express.Router();
   const auth = sessionMiddleware(db);
@@ -253,6 +260,15 @@ export async function mountPanelArkApi(app: Express) {
 
   router.get("/resources", (_req, res) => {
     res.json({ success: true, items: db.all("SELECT id, type, title, description, badge, url, sort_order FROM recommended_resources WHERE enabled = 1 ORDER BY sort_order, created_at") });
+  });
+
+  router.get('/resources/:id/open', (req, res) => {
+    const item = db.get('SELECT id, url FROM recommended_resources WHERE id = ? AND enabled = 1', [text(req.params.id, 80)]);
+    if (!item) return res.status(404).json({ success: false, error: '推荐资源不存在或已下架' });
+    const url = new URL(String(item.url));
+    if (url.protocol !== 'https:' || url.username || url.password) return res.status(400).json({ success: false, error: '推荐资源地址无效' });
+    db.run('UPDATE recommended_resources SET click_count = click_count + 1 WHERE id = ?', [item.id]);
+    res.set('Cache-Control', 'no-store').redirect(302, url.toString());
   });
 
   router.post("/resources/:id/click", (req, res) => {
@@ -285,6 +301,78 @@ export async function mountPanelArkApi(app: Express) {
     };
   }
 
+  const currentDelivery = (req: Request) => {
+    // Polling keeps an open result alive indefinitely; abandoned pages leave no durable secret.
+    const token = req.header('x-panelark-delivery');
+    const receipt = token ? deliveries.get(sha256(token)) : undefined;
+    if (receipt) receipt.touched = Date.now();
+    for (const [key, value] of deliveries) {
+      if (Date.now() - value.touched > 60 * 60_000 && !['queued', 'running', 'cancelling'].includes(jobEngine.getJob(value.job_id)?.status || '')) deliveries.delete(key);
+    }
+    return receipt;
+  };
+  router.get('/deployment/current', (req, res) => {
+    try {
+      const receipt = currentDelivery(req);
+      if (!receipt) return res.set('Cache-Control', 'no-store').json({ success: true, job: null });
+      const job = jobEngine.getJob(String(receipt.job_id));
+      const cdk = db.get(`SELECT c.used_count, COALESCE(c.max_uses_override, p.max_uses) AS max_uses, c.id FROM cdks c JOIN cdk_packages p ON p.id = c.package_id JOIN cdk_grants g ON g.cdk_id = c.id JOIN deployment_jobs j ON j.grant_hash = g.token_hash WHERE j.id = ?`, [receipt.job_id]);
+      const locked = cdk ? Number(db.get("SELECT COUNT(*) AS n FROM cdk_grants WHERE cdk_id = ? AND status = 'locked' AND expires_at > ?", [cdk.id, now()])?.n || 0) : 0;
+      const usage = cdk ? { totalUses: Number(cdk.max_uses), usedCount: Number(cdk.used_count), lockedCount: locked, remaining: Math.max(0, Number(cdk.max_uses) - Number(cdk.used_count) - locked) } : undefined;
+      res.set('Cache-Control', 'no-store').json({ success: true, job, result: receipt.result, usage });
+    } catch { res.status(409).json({ success: false, error: '交付信息暂时无法读取，请保留此页面并联系管理员' }); }
+  });
+  router.post('/deployment/current/acknowledge', (req, res) => {
+    const receipt = currentDelivery(req);
+    if (!receipt || req.header('x-panelark-result') !== receipt.job_id) return res.status(403).json({ success: false, error: '无权关闭此部署结果' });
+    const job = jobEngine.getJob(String(receipt.job_id));
+    if (!job || ['queued', 'running', 'cancelling'].includes(job.status)) return res.status(409).json({ success: false, error: '任务仍在执行，不能关闭交付信息' });
+    deliveries.delete(sha256(req.header('x-panelark-delivery')!));
+    adapterResults.delete(String(receipt.job_id)); adapterExecutions.delete(String(receipt.job_id));
+    res.json({ success: true });
+  });
+
+  function runRegisteredJob(jobId: string, grant: ReturnType<typeof resolveJobGrant>) {
+    const execution = adapterExecutions.get(jobId);
+    if (!execution) throw new Error('部署执行上下文已失效，请重新填写服务器信息');
+    const automatic = execution.payload.autoDeploy === true;
+    return jobEngine.startJob(jobId, async context => {
+      const adapter = getPanelAdapter(execution.adapterId);
+      if (!adapter) throw new Error('面板适配器不存在或已下架');
+      if (!automatic) {
+        const result = await adapter.execute(execution.operation, { ...context, payload: execution.payload });
+        adapterResults.set(jobId, result);
+        const expiry = setTimeout(() => adapterResults.delete(jobId), GRANT_MINUTES * 60_000); expiry.unref();
+        return result;
+      }
+      const releaseLease = remoteApi.retain(grant.grantToken, execution.payload.serverSessionId);
+      try {
+        const result = await executeAutomaticDeployment(adapter, execution.payload, { ...context, payload: execution.payload }, {
+          onDelivery: result => { for (const receipt of deliveries.values()) if (receipt.job_id === jobId) receipt.result = { ...result }; },
+        });
+        context.checkCancelled();
+        for (const receipt of deliveries.values()) if (receipt.job_id === jobId) receipt.result = result;
+        db.transaction(() => {
+          const locked = db.get('SELECT id, cdk_id, status FROM cdk_grants WHERE token_hash = ? AND task_key = ?', [grant.grantHash, grant.taskKey]);
+          if (!locked || !['locked', 'consumed'].includes(String(locked.status))) throw new Error('面板已安装，但授权核销未完成，请保存交付信息并联系管理员');
+          if (locked.status === 'locked') {
+            db.run("UPDATE cdk_grants SET status = 'consumed', consumed_at = ? WHERE id = ?", [now(), locked.id]);
+            db.run('UPDATE cdks SET used_count = used_count + 1, updated_at = ? WHERE id = ?', [now(), locked.cdk_id]);
+          }
+        });
+        // No login URL, password or bearer-link can be recovered from durable task history.
+        return { adapterId: execution.adapterId, completed: true };
+      } catch (error) {
+        db.run("UPDATE cdk_grants SET status = 'released', released_at = ? WHERE token_hash = ? AND task_key = ? AND status = 'locked'", [now(), grant.grantHash, grant.taskKey]);
+        throw error;
+      } finally {
+        releaseLease();
+        try { remoteApi.disconnect(grant.grantToken, execution.payload.serverSessionId); } catch { /* TTL handles an already disconnected session. */ }
+        adapterExecutions.delete(jobId);
+      }
+    });
+  }
+
   router.post("/jobs", (req, res) => {
     try {
       const grant = resolveJobGrant(req.body?.grantToken, req.body?.taskKey);
@@ -298,21 +386,40 @@ export async function mountPanelArkApi(app: Express) {
       if (!["install", "create-node"].includes(operation) || !catalogItem.operations.includes(operation)) throw new Error("面板任务操作无效或当前适配器不支持此操作");
       const rawPayload = req.body?.payload && typeof req.body.payload === "object" ? { ...req.body.payload } : {};
       const executionPayload = { ...rawPayload };
+      const automatic = rawPayload.autoDeploy === true;
+      if (automatic && (operation !== 'install' || !executionPayload.serverSessionId)) throw new Error('自动部署需要已连接的服务器会话');
+      if (automatic && currentDelivery(req)) throw new Error('还有未关闭的部署任务或结果，请先查看并关闭后再开始新任务');
       if (operation === "install" && executionPayload.serverSessionId) {
         executionPayload.sshSession = remoteApi.getSshSession(grant.grantToken, executionPayload.serverSessionId);
+        const session = executionPayload.sshSession;
+        executionPayload.ipOrDomain = session.host; executionPayload.sshPort = session.port; executionPayload.sshUser = session.user;
       }
       const job = jobEngine.createJob({
         kind: text(req.body?.kind, 80) || (operation === "create-node" ? "node-create" : "panel-install"),
-        serverKey: text(req.body?.serverKey, 180),
+        serverKey: executionPayload.sshSession ? `${executionPayload.sshSession.host}:${executionPayload.sshSession.port}` : text(req.body?.serverKey, 180),
         grantHash: grant.grantHash,
         taskKey: grant.taskKey,
         idempotencyKey: text(req.body?.idempotencyKey, 180) || `${grant.taskKey}:${text(req.body?.kind, 80) || operation || "panel-deployment"}`,
         payload: { ...rawPayload, adapterId, operation },
-        steps: getPanelAdapterSteps(adapterId, operation),
-        timeoutMs: req.body?.timeoutMs,
+        steps: automatic ? [...automaticSteps, ...getPanelAdapterSteps(adapterId, operation), ...automaticFinalSteps] : getPanelAdapterSteps(adapterId, operation),
+        timeoutMs: automatic ? 45 * 60_000 : req.body?.timeoutMs,
         maxAttempts: req.body?.maxAttempts,
       });
+      if (!jobEngine.getJobForGrant(job.id, grant.grantHash)) throw new Error('任务标识已被其他授权使用，请重新开始');
+      if (automatic && (job.status !== 'queued' || [...deliveries.values()].some(receipt => receipt.job_id === job.id))) throw new Error('同一安装任务已经创建，不会重复执行；请在原页面等待结果');
       adapterExecutions.set(job.id, { adapterId, operation, payload: executionPayload });
+      if (automatic) {
+        const receipt = randomSecret();
+        deliveries.set(sha256(receipt), { job_id: job.id, touched: Date.now() });
+        db.run("UPDATE cdk_grants SET expires_at = ? WHERE token_hash = ? AND status = 'locked'", [future(60), grant.grantHash]);
+        try { runRegisteredJob(job.id, grant).catch(() => undefined); }
+        catch (error) {
+          jobEngine.cancelJob(job.id);
+          db.run("UPDATE deployment_jobs SET status = 'failed', error_message = ? WHERE id = ?", [error instanceof Error ? error.message : '任务启动失败', job.id]);
+          db.run("UPDATE cdk_grants SET status = 'released', released_at = ? WHERE token_hash = ? AND status = 'locked'", [now(), grant.grantHash]);
+        }
+        return res.status(201).set('Cache-Control', 'no-store').json({ success: true, job, receipt });
+      }
       res.status(201).json({ success: true, job });
     } catch (error) { sendError(res, error, 409); }
   });
@@ -355,15 +462,7 @@ export async function mountPanelArkApi(app: Express) {
       if (!job) throw new Error("部署任务不存在或无权访问");
       const execution = adapterExecutions.get(job.id);
       if (!execution) throw new Error("部署执行上下文已失效，请重新创建任务；系统不会在缺少凭据时继续执行");
-      const run = jobEngine.startJob(job.id, async context => {
-        const adapter = getPanelAdapter(execution.adapterId);
-        if (!adapter) throw new Error("面板适配器不存在或已被卸载");
-        const result = await adapter.execute(execution.operation, { ...context, payload: execution.payload });
-        adapterResults.set(job.id, result);
-        const expiry = setTimeout(() => adapterResults.delete(job.id), GRANT_MINUTES * 60_000);
-        expiry.unref();
-        return result;
-      });
+      const run = runRegisteredJob(job.id, grant);
       run.catch(() => undefined);
       res.status(202).json({ success: true, job: jobEngine.getJob(job.id) });
     } catch (error) { sendError(res, error, 409); }
@@ -437,7 +536,7 @@ export async function mountPanelArkApi(app: Express) {
         "INSERT INTO cdk_grants(id, cdk_id, token_hash, status, created_at, expires_at) VALUES (?, ?, ?, 'validated', ?, ?)",
         [randomUUID(), row.id, sha256(grantToken), now(), future(GRANT_MINUTES)],
       );
-      res.json({ success: true, grantToken, packageName: row.package_name, remaining, expiresInMinutes: GRANT_MINUTES });
+      res.set('Cache-Control', 'no-store').json({ success: true, grantToken, packageName: row.package_name, remaining, totalUses: Number(row.max_uses), usedCount: Number(row.used_count), lockedCount: Number(locked?.total || 0), expiresInMinutes: GRANT_MINUTES });
     } catch (error) { sendError(res, error); }
   });
 
