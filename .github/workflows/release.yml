@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Keep the reload latch across React update phase effects to prevent duplicate navigation|Add complete production-page regression through confirmation installation health recovery and one reload|Document verified legacy page behavior: already-loaded 2.4.0 JavaScript requires one initial manual reload"
+          PANELARK_RELEASE_NOTES: "Complete super-admin business management while preserving operator and support roles|Add task details, after-sales records CRUD, review states, export, safe cancellation and deletion|Complete package, batch, administrator, recommendation, backup and audit management|Fix database foreign keys after export and prevent premature or duplicate CDK refunds"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

@@ -249,6 +249,20 @@ const MIGRATIONS = [
     ALTER TABLE cdks ADD COLUMN code_encrypted TEXT;
     ALTER TABLE cdks ADD COLUMN max_uses_override INTEGER CHECK(max_uses_override IS NULL OR max_uses_override > 0);
   `,
+  `
+    ALTER TABLE audit_logs ADD COLUMN actor_name TEXT;
+    UPDATE audit_logs SET actor_name = (SELECT username FROM admins WHERE admins.id = audit_logs.admin_id);
+    ALTER TABLE backup_records ADD COLUMN label TEXT NOT NULL DEFAULT '';
+    CREATE TABLE job_notes (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES deployment_jobs(id) ON DELETE CASCADE,
+      note TEXT NOT NULL,
+      created_by TEXT REFERENCES admins(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_job_notes_job ON job_notes(job_id, created_at);
+  `,
 ];
 
 export class PanelArkDatabase {
@@ -318,7 +332,10 @@ export class PanelArkDatabase {
   }
 
   exportBytes() {
-    return Buffer.from(this.db.export());
+    // sql.js export reopens its SQLite connection, resetting connection-local PRAGMAs.
+    // Re-enable constraints after every export, including ordinary persistence.
+    try { return Buffer.from(this.db.export()); }
+    finally { this.db.run('PRAGMA foreign_keys = ON'); }
   }
 
   replaceFromBytes(bytes: Uint8Array) {
@@ -377,7 +394,7 @@ export class PanelArkDatabase {
 
   private persist() {
     const temporary = `${this.filePath}.tmp`;
-    fs.writeFileSync(temporary, Buffer.from(this.db.export()));
+    fs.writeFileSync(temporary, this.exportBytes());
     fs.renameSync(temporary, this.filePath);
   }
 }

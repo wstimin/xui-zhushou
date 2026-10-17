@@ -83,7 +83,8 @@ export function mountCdkManagement(router: Router, db: PanelArkDatabase, current
   const failure = (res: Response, error: unknown, status = 400) => res.status(status).json({ success: false, error: error instanceof Error ? error.message : '操作失败' });
   const assertUnlocked = (rows: DbRow[]) => {
     for (const row of rows) {
-      if (db.get("SELECT id FROM cdk_grants WHERE cdk_id = ? AND status = 'locked' AND expires_at > ?", [row.id, new Date().toISOString()])) throw new Error('CDK 正在被部署任务占用，请先完成或结束任务后再修改或删除');
+      if (db.get(`SELECT g.id FROM cdk_grants g WHERE g.cdk_id = ? AND
+        ((g.status = 'locked' AND g.expires_at > ?) OR EXISTS (SELECT 1 FROM deployment_jobs j WHERE j.task_key=g.task_key AND j.status IN ('queued','running','cancelling')))`, [row.id, new Date().toISOString()])) throw new Error('CDK 正在被部署任务占用，请先完成或结束任务后再修改或删除');
     }
   };
   const remove = (req: Request, input: Record<string, any>) => {

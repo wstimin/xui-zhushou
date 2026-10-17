@@ -111,6 +111,8 @@ test("preparing an update creates a managed backup without a user password", asy
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "panelark-update-prepare-"));
   fs.writeFileSync(path.join(directory, "panelark.secret"), Buffer.alloc(32, 6));
   const db = await PanelArkDatabase.open(path.join(directory, "panelark.sqlite"));
+  const timestamp = new Date().toISOString();
+  db.run("INSERT INTO admins(id,username,password_hash,role,created_at,updated_at,password_changed_at) VALUES ('admin','owner','test-fixture','super_admin',?,?,?)", [timestamp,timestamp,timestamp]);
   const previousFetch = globalThis.fetch;
   const archive = Buffer.from("signed-release-archive");
   const { manifest, publicKey } = signedManifest("99.0.0");

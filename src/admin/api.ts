@@ -1,7 +1,7 @@
 export type AdminRole = 'super_admin' | 'operator' | 'support';
 
 export interface AdminIdentity { id: string; username: string; role: AdminRole; totpEnabled?: boolean }
-export interface AdminRecord extends AdminIdentity { enabled: number; created_at: string; updated_at: string }
+export interface AdminRecord extends AdminIdentity { enabled: number; totp_enabled?: number; created_at: string; updated_at: string }
 export interface DashboardStats { totalCdks: number; activeCdks: number; consumed: number; locked: number; jobsPendingReview: number; resourceClicks: number }
 export interface PackageRecord {
   id: string; name: string; description: string; max_uses: number; allowed_panel?: string;
@@ -21,13 +21,16 @@ export interface AuditRecord {
   ip?: string; details?: string; created_at: string;
 }
 export interface AdminSettings {
+  siteName?: string; siteUrl?: string;
   purchaseEnabled: boolean; purchaseButtonText: string; purchaseUrl: string; supportUrl: string; siteNotice: string; adminPath: string;
 }
 export interface CatalogAdminRecord { id: string; name: string; kind: 'panel' | 'tool'; category: string; description: string; enabled: boolean; sortOrder: number }
 export interface ResourceRecord { id: string; type: 'vps' | 'domain' | 'cdn' | 'other'; title: string; description: string; badge: string; url: string; enabled: number; sort_order: number; click_count: number }
 export interface JobReviewRecord { id: string; kind: string; status: string; recovery_status: string; progress: number; error_message?: string; task_key?: string; created_at: string; updated_at: string; review_status?: string; refund_status?: string; note?: string }
 export interface SessionRecord { id: string; ip?: string; user_agent?: string; created_at: string; last_seen_at: string; expires_at: string }
-export interface BackupRecord { id: string; filename: string; reason: string; size_bytes: number; created_at: string }
+export interface BackupRecord { id: string; filename: string; label?: string; reason: string; size_bytes: number; created_at: string }
+export interface JobNote { id: string; job_id: string; note: string; username?: string; created_at: string; updated_at: string }
+export interface JobDetail { success: true; job: import('../../server/panelark-jobs').DeploymentJob; events: import('../../server/panelark-jobs').JobEvent[]; notes: JobNote[]; review: { status: string; refund_status: string; note: string } | null; grant: { status: string; code_hint: string; used_count: number; max_uses: number } | null }
 export interface UpdateState {
   phase: 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'prepared' | 'applying' | 'restarting' | 'completed' | 'rolled_back' | 'failed';
   progress: number; currentVersion: string; targetVersion?: string; channel: 'stable'; message: string;
@@ -72,6 +75,30 @@ export async function allPackageOptions() {
 }
 
 export const adminApi = {
+  editPackage: (id: string, payload: Record<string, unknown>) => api(`/packages/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deletePackage: (id: string) => api(`/packages/${id}`, { method: 'DELETE', body: JSON.stringify({ cascadeCodes: true }) }),
+  renameBatch: (id: string, name: string) => api(`/batches/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteBatch: (id: string) => api(`/batches/${id}`, { method: 'DELETE', body: JSON.stringify({ cascadeCodes: true }) }),
+  editAdmin: (id: string, payload: { username: string; role: AdminRole; enabled: boolean }) => api(`/admins/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  resetAdminPassword: (id: string, password: string) => api(`/admins/${id}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  resetAdmin2fa: (id: string) => api(`/admins/${id}/reset-2fa`, { method: 'POST', body: '{}' }),
+  revokeAdminSessions: (id: string) => api(`/admins/${id}/sessions`, { method: 'DELETE' }),
+  deleteAdmin: (id: string) => api(`/admins/${id}`, { method: 'DELETE' }),
+  resetCatalog: (id: string) => api(`/catalog/${id}`, { method: 'DELETE' }),
+  jobDetail: (id: string) => api<JobDetail>(`/jobs/${id}`),
+  cancelJob: (id: string) => api(`/jobs/${id}/cancel`, { method: 'POST', body: '{}' }),
+  deleteJob: (id: string) => api(`/jobs/${id}`, { method: 'DELETE', body: JSON.stringify({ confirm: 'DELETE' }) }),
+  deleteJobReview: (id: string) => api(`/jobs/${id}/review`, { method: 'DELETE' }),
+  createJobNote: (id: string, note: string) => api(`/jobs/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
+  updateJobNote: (id: string, noteId: string, note: string) => api(`/jobs/${id}/notes/${noteId}`, { method: 'PUT', body: JSON.stringify({ note }) }),
+  deleteJobNote: (id: string, noteId: string) => api(`/jobs/${id}/notes/${noteId}`, { method: 'DELETE' }),
+  exportJobs: () => api<{ filename: string; content: string }>('/jobs/export'),
+  labelBackup: (id: string, label: string) => api(`/backups/${id}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
+  deleteBackup: (id: string) => api<{ message: string }>(`/backups/${id}`, { method: 'DELETE' }),
+  backupSchedule: () => api<{ enabled: boolean; configured: boolean; lastRunAt: string }>('/backup-schedule'),
+  saveBackupSchedule: (enabled: boolean) => api('/backup-schedule', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  exportAudit: () => api<{ filename: string; content: string }>('/audit/export'),
+  clearAudit: (before: string) => api<{ affected: number }>('/audit', { method: 'DELETE', body: JSON.stringify({ before, confirm: 'DELETE' }) }),
   bootstrapState: () => api<{ success: true; required: boolean; setupTokenRequired: boolean }>('/bootstrap', { csrf: false }),
   bootstrap: (setupToken: string, username: string, password: string) => api<{ success: true; admin: AdminIdentity; csrfToken: string }>('/bootstrap', { method: 'POST', body: JSON.stringify({ setupToken, username, password }), csrf: false }),
   login: (username: string, password: string, totpCode?: string) => api<{ success: true; admin: AdminIdentity; csrfToken: string }>('/login', { method: 'POST', body: JSON.stringify({ username, password, totpCode }), csrf: false }),
@@ -102,7 +129,7 @@ export const adminApi = {
   createResource: (payload: Omit<ResourceRecord, 'id' | 'click_count'>) => api<{ success: true; id: string }>('/resources', { method: 'POST', body: JSON.stringify(payload) }),
   updateResource: (id: string, payload: Partial<ResourceRecord>) => api<{ success: true }>(`/resources/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteResource: (id: string) => api<{ success: true }>(`/resources/${id}`, { method: 'DELETE' }),
-  jobs: (query: PageQuery = {}) => api<PageResult<JobReviewRecord>>(pagePath('/jobs', query)),
+  jobs: (query: PageQuery & { search?: string; status?: string; reviewStatus?: string } = {}) => api<PageResult<JobReviewRecord>>(`${pagePath('/jobs', query)}&${new URLSearchParams({ search: query.search || '', status: query.status || '', reviewStatus: query.reviewStatus || '' })}`),
   reviewJob: (id: string, payload: { status: string; note: string }) => api<{ success: true }>(`/jobs/${id}/review`, { method: 'PUT', body: JSON.stringify(payload) }),
   refundJob: (id: string, note: string) => api<{ success: true; alreadyRefunded: boolean }>(`/jobs/${id}/refund`, { method: 'POST', body: JSON.stringify({ note }) }),
   sessions: (query: PageQuery = {}) => api<PageResult<SessionRecord> & { currentSessionId: string }>(pagePath('/sessions', query)),

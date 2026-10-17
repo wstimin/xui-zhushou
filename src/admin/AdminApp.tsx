@@ -19,6 +19,7 @@ import type { Theme } from '../panelark/types';
 import { PanelArkMark } from '../components/PanelArkMark';
 import { CdkCodesDialog, CdkManagementTable } from './CdkManagement';
 import { updateReloadParameter, useUpdatePageReload } from './update-refresh';
+import { AdminManagement, AuditManagement, BackupManagement, CatalogManagement, JobManagement, PackageManagement, ResourceManagement } from './Management';
 
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
@@ -92,15 +93,15 @@ function AdminAppContent() {
       </header>
       <div className="admin-content">
         {view === 'overview' && <OverviewPage notify={setNotice} />}
-        {view === 'jobs' && <JobsPage notify={setNotice} />}
+        {view === 'jobs' && <JobsPage admin={admin} notify={setNotice} />}
         {view === 'cdk' && <CdkPage admin={admin} notify={setNotice} />}
         {view === 'catalog' && admin.role !== 'support' && <CatalogAdminPage notify={setNotice} />}
         {view === 'resources' && admin.role !== 'support' && <ResourcesPage notify={setNotice} />}
         {view === 'settings' && <SettingsPage admin={admin} notify={setNotice} />}
-        {view === 'admins' && admin.role === 'super_admin' && <AdminsPage current={admin} notify={setNotice} />}
+        {view === 'admins' && admin.role === 'super_admin' && <AdminsPage current={admin} onChanged={setAdmin} notify={setNotice} />}
         {view === 'backups' && admin.role === 'super_admin' && <BackupsPage notify={setNotice} />}
         {view === 'update' && admin.role === 'super_admin' && <UpdatePage notify={setNotice} />}
-        {view === 'audit' && <AuditPage notify={setNotice} />}
+        {view === 'audit' && <AuditPage admin={admin} notify={setNotice} />}
         {view === 'account' && <AccountPage admin={admin} onChanged={setAdmin} notify={setNotice} />}
       </div>
     </main>
@@ -211,6 +212,7 @@ function CdkPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Not
       <form noValidate className="admin-panel" onSubmit={createBatch}><PanelTitle icon={KeyRound} title="批量生成" subtitle="最多一次生成 500 个" /><label className="admin-field"><span>选择套餐</span><select value={batchForm.packageId} onChange={event => setBatchForm({ ...batchForm, packageId: event.target.value })} required>{packages.filter(item => item.enabled).map(item => <option key={item.id} value={item.id}>{item.name} · {item.max_uses} 次</option>)}</select></label><div className="admin-form-grid"><AdminInput label="批次名称" value={batchForm.name} setValue={name => setBatchForm({ ...batchForm, name })} /><AdminInput label="生成数量" type="number" value={String(batchForm.quantity)} setValue={value => setBatchForm({ ...batchForm, quantity: Number(value) })} required /></div><button className="admin-primary" disabled={busy || !batchForm.packageId}>生成 CDK</button></form>
     </div>}
     <CdkManagementTable admin={admin} notify={notify} refreshKey={refreshKey} />
+    {writable && <PackageManagement notify={notify} refreshKey={refreshKey} onChanged={() => { void load(); setRefreshKey(key => key + 1); }} />}
     {generated && <CdkCodesDialog codes={generated} onClose={() => setGenerated(null)} notify={notify} />}
   </>;
 }
@@ -243,9 +245,9 @@ function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
   return <><PageHeading kicker="Site configuration" title="站点配置" description="管理访问入口、CDK 购买渠道和站点公告。保存后购买跳转立即生效。" /><form noValidate className="admin-panel admin-settings-form" onSubmit={submit}>
-    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>访问入口</legend><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><p className="admin-readonly">修改后会跳转到新后台地址，请保存此地址。</p></fieldset>
+    <fieldset disabled={loading || busy} className="admin-settings-section"><legend>访问入口</legend><AdminInput label="站点名称" value={form.siteName || ''} setValue={siteName => setForm({ ...form, siteName })} disabled={!editable} /><AdminInput label="站点地址（HTTP/HTTPS）" value={form.siteUrl || ''} setValue={siteUrl => setForm({ ...form, siteUrl })} disabled={!editable} /><AdminInput label="管理后台路径（仅超级管理员）" value={form.adminPath} setValue={adminPath => setForm({ ...form, adminPath })} placeholder="/admin" disabled={admin.role !== 'super_admin'} /><p className="admin-readonly">修改后会跳转到新后台地址，请保存此地址。</p></fieldset>
     <fieldset disabled={loading || busy} className="admin-settings-section"><legend>购买 CDK 跳转</legend>
-    <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>在导航、面板目录和授权弹窗中显示购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
+    <label className="admin-switch"><span><strong>显示购买 CDK 按钮</strong><small>在验证 CDK 操作区显示购买入口</small></span><input type="checkbox" checked={form.purchaseEnabled} onChange={event => setForm({ ...form, purchaseEnabled: event.target.checked })} disabled={!editable} /><i /></label>
     <AdminInput label="购买按钮文字" value={form.purchaseButtonText} setValue={purchaseButtonText => setForm({ ...form, purchaseButtonText })} disabled={!editable} />
     <AdminInput label="购买 CDK 的跳转链接（HTTPS）" type="url" value={form.purchaseUrl} setValue={purchaseUrl => setForm({ ...form, purchaseUrl })} placeholder="https://shop.example.com/cdk" disabled={!editable} />
     <div className="admin-settings-help"><p>“购买 CDK”按钮只使用这里的购买链接，不使用下面的客服链接。修改后请点击“保存配置”。</p><p>已保存的购买地址：<strong data-saved-purchase>{loading ? '正在读取…' : saved?.purchaseUrl || '未设置'}</strong></p>{saved && form.purchaseUrl !== saved.purchaseUrl && <p role="status">购买链接有未保存修改，当前跳转仍使用上方已保存地址。</p>}{saved?.purchaseEnabled && saved.purchaseUrl && <a href="/api/public/purchase" target="_blank" rel="noopener noreferrer">测试已保存的购买跳转 ↗</a>}</div></fieldset>
@@ -255,70 +257,15 @@ function SettingsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice
   </form></>;
 }
 
-function AdminsPage({ current, notify }: { current: AdminIdentity; notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<AdminRecord, Awaited<ReturnType<typeof adminApi.admins>>>(adminApi.admins, notify);
-  const dialog = useAdminDialog();
-  const [form, setForm] = useState<{ username: string; password: string; role: AdminRole }>({ username: '', password: '', role: 'operator' });
-  const create = async (event: FormEvent) => {
-    event.preventDefault();
-    try { await adminApi.createAdmin(form); setForm({ username: '', password: '', role: 'operator' }); notify({ kind: 'success', text: '管理员已创建' }); await load(); }
-    catch (error) { notify({ kind: 'error', text: message(error) }); }
-  };
-  const update = async (item: AdminRecord, role: AdminRole, enabled: boolean) => {
-    try { await adminApi.updateAdmin(item.id, { role, enabled }); notify({ kind: 'success', text: '管理员权限已更新' }); await load(); }
-    catch (error) { notify({ kind: 'error', text: message(error) }); }
-  };
-  return <><PageHeading kicker="Access control" title="管理员与权限" description="按职责分配超级管理员、运营或售后角色，可随时停用非当前账号。" /><div className="admin-two-column narrow-right"><section className="admin-panel admin-table-panel"><PanelTitle icon={Users} title="账号列表" subtitle={`${pagination.total} 位管理员`} /><div className="admin-table-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td>{item.username}{item.id === current.id && <small> · 当前</small>}</td><td><select className="table-select" value={item.role} disabled={item.id === current.id} onChange={event => update(item, event.target.value as AdminRole, Boolean(item.enabled))}>{Object.entries(roleNames).map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></td><td><button className={`status-toggle ${item.enabled ? 'on' : ''}`} disabled={item.id === current.id} onClick={() => update(item, item.role, !item.enabled)}>{item.enabled ? '已启用' : '已停用'}</button></td></tr>)}</tbody></table></div>{pager}</section><form noValidate className="admin-panel" onSubmit={create}><PanelTitle icon={UserCog} title="创建管理员" subtitle="密码必须满足强度要求" /><AdminInput label="用户名" value={form.username} setValue={username => setForm({ ...form, username })} required /><AdminInput label="初始密码" type="password" value={form.password} setValue={password => setForm({ ...form, password })} required /><label className="admin-field"><span>角色</span><select value={form.role} onChange={event => setForm({ ...form, role: event.target.value as AdminRole })}><option value="operator">运营管理员</option><option value="support">售后人员</option><option value="super_admin">超级管理员</option></select></label><button className="admin-primary">创建账号</button></form></div></>;
-}
+function AdminsPage({ current, onChanged, notify }: { current: AdminIdentity; onChanged: (admin: AdminIdentity) => void; notify: (notice: Notice) => void }) { return <AdminManagement current={current} onChanged={onChanged} notify={notify} />; }
 
-function JobsPage({ notify }: { notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<JobReviewRecord, Awaited<ReturnType<typeof adminApi.jobs>>>(adminApi.jobs, notify);
-  const dialog = useAdminDialog();
-  const review = async (item: JobReviewRecord, refund = false) => {
-    const note = await dialog.prompt({ title: refund ? '返还 CDK' : '审核任务', message: refund ? '填写返还原因' : '填写审核备注', initialValue: item.note || '' });
-    if (note === null) return;
-    try {
-      if (refund) await adminApi.refundJob(item.id, note); else await adminApi.reviewJob(item.id, { status: 'resolved', note });
-      notify({ kind: 'success', text: refund ? 'CDK 权益已幂等返还' : '任务审核已完成' }); await load();
-    } catch (error) { notify({ kind: 'error', text: message(error) }); }
-  };
-  return <><PageHeading kicker="After-sales workflow" title="任务售后与人工审核" description="检查失败、人工恢复和异常任务，记录处置结论并按任务返还 CDK 权益。" action={<button className="admin-ghost" onClick={load}><RefreshCw size={15} /> 刷新</button>} /><section className="admin-panel admin-table-panel"><div className="admin-table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>进度</th><th>审核</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><code>{item.id.slice(0, 8)}</code><small> · {item.kind}</small></td><td>{item.status}{item.error_message && <small> · {item.error_message.slice(0, 50)}</small>}</td><td>{item.progress}%</td><td>{item.review_status || '待处理'} · {item.refund_status || 'none'}</td><td><button className="admin-ghost" onClick={() => review(item)}>审核</button> <button className="admin-ghost" disabled={!item.task_key || item.refund_status === 'refunded'} onClick={() => review(item, true)}>返还 CDK</button></td></tr>)}</tbody></table>{!items.length && <Empty text="暂无部署任务" />}</div>{pager}</section></>;
-}
+function JobsPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Notice) => void }) { return <JobManagement admin={admin} notify={notify} />; }
 
-function CatalogAdminPage({ notify }: { notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<CatalogAdminRecord, Awaited<ReturnType<typeof adminApi.catalog>>>(adminApi.catalog, notify);
-  const dialog = useAdminDialog();
-  const save = async (item: CatalogAdminRecord) => {
-    try { await adminApi.updateCatalog(item.id, item); notify({ kind: 'success', text: `${item.name} 已更新` }); await load(); }
-    catch (error) { notify({ kind: 'error', text: message(error) }); }
-  };
-  const patch = (id: string, changes: Partial<CatalogAdminRecord>) => setItems(current => current.map(item => item.id === id ? { ...item, ...changes } : item));
-  return <><PageHeading kicker="Catalog operations" title="目录运营" description="无需修改代码即可调整分类、排序、文案以及紧急上架或下架。" action={<button className="admin-ghost" onClick={load}><RefreshCw size={15} /> 刷新</button>} /><section className="admin-panel admin-table-panel"><div className="admin-table-wrap"><table><thead><tr><th>名称</th><th>分类</th><th>展示文案</th><th>排序</th><th>状态</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><input value={item.name} onChange={event => patch(item.id, { name: event.target.value })} /><small> · {item.kind}</small></td><td><input value={item.category} onChange={event => patch(item.id, { category: event.target.value })} /></td><td><input value={item.description} onChange={event => patch(item.id, { description: event.target.value })} /></td><td><input type="number" value={item.sortOrder} onChange={event => patch(item.id, { sortOrder: Number(event.target.value) })} /></td><td><button className={`status-toggle ${item.enabled ? 'on' : ''}`} onClick={() => patch(item.id, { enabled: !item.enabled })}>{item.enabled ? '已上架' : '已下架'}</button></td><td><button className="admin-ghost" onClick={() => save(item)}>保存</button></td></tr>)}</tbody></table></div>{pager}</section></>;
-}
+function CatalogAdminPage({ notify }: { notify: (notice: Notice) => void }) { return <CatalogManagement notify={notify} />; }
 
-function ResourcesPage({ notify }: { notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<ResourceRecord, Awaited<ReturnType<typeof adminApi.resources>>>(adminApi.resources, notify);
-  const dialog = useAdminDialog();
-  const [form, setForm] = useState({ type: 'vps' as ResourceRecord['type'], title: '', description: '', badge: '', url: '', enabled: 1, sort_order: 100 });
-  const create = async (event: FormEvent) => { event.preventDefault(); try { await adminApi.createResource(form); setForm({ type: 'vps', title: '', description: '', badge: '', url: '', enabled: 1, sort_order: 100 }); notify({ kind: 'success', text: '推荐资源已创建' }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const toggle = async (item: ResourceRecord) => { try { await adminApi.updateResource(item.id, { enabled: item.enabled ? 0 : 1 }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const patch = (id: string, changes: Partial<ResourceRecord>) => setItems(current => current.map(item => item.id === id ? { ...item, ...changes } : item));
-  const save = async (item: ResourceRecord) => { try { await adminApi.updateResource(item.id, item); notify({ kind: 'success', text: '推荐资源已保存' }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const remove = async (item: ResourceRecord) => { if (!await dialog.confirm({ title: '删除推荐', message: `删除推荐“${item.title}”？` })) return; try { await adminApi.deleteResource(item.id); notify({ kind: 'success', text: '推荐资源已删除' }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  return <><PageHeading kicker="Recommendations" title="资源推荐与点击统计" description="维护 VPS、域名、CDN 等 HTTPS 推荐链接，并查看真实点击次数。" /><div className="admin-two-column narrow-right"><section className="admin-panel admin-table-panel"><div className="admin-table-wrap"><table><thead><tr><th>标题</th><th>链接</th><th>点击</th><th>状态</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><input value={item.title} onChange={event => patch(item.id, { title: event.target.value })} /></td><td><input type="url" value={item.url} onChange={event => patch(item.id, { url: event.target.value })} /></td><td>{item.click_count}</td><td><button className={`status-toggle ${item.enabled ? 'on' : ''}`} onClick={() => toggle(item)}>{item.enabled ? '上架' : '下架'}</button></td><td><button className="admin-ghost" onClick={() => save(item)}>保存</button> <button className="admin-ghost" onClick={() => remove(item)}>删除</button></td></tr>)}</tbody></table>{!items.length && <Empty text="尚未配置推荐资源" />}</div>{pager}</section><form noValidate className="admin-panel" onSubmit={create}><PanelTitle icon={PackagePlus} title="新增推荐" subtitle="仅允许 HTTPS 外链" /><label className="admin-field"><span>类型</span><select value={form.type} onChange={event => setForm({ ...form, type: event.target.value as ResourceRecord['type'] })}><option value="vps">VPS</option><option value="domain">域名</option><option value="cdn">CDN</option><option value="other">其他</option></select></label><AdminInput label="标题" value={form.title} setValue={title => setForm({ ...form, title })} required /><AdminInput label="说明" value={form.description} setValue={description => setForm({ ...form, description })} /><AdminInput label="标签" value={form.badge} setValue={badge => setForm({ ...form, badge })} /><AdminInput label="HTTPS 链接" type="url" value={form.url} setValue={url => setForm({ ...form, url })} required /><button className="admin-primary">创建推荐</button></form></div></>;
-}
+function ResourcesPage({ notify }: { notify: (notice: Notice) => void }) { return <ResourceManagement notify={notify} />; }
 
-function BackupsPage({ notify }: { notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<BackupRecord, Awaited<ReturnType<typeof adminApi.backups>>>(adminApi.backups, notify);
-  const dialog = useAdminDialog();
-  const passphrase = () => dialog.prompt({ title: '备份加密密码', message: '至少 6 位，用于加密手动备份文件，与登录密码无关，不会保存到数据库。建议使用更长的随机密码。', secret: true, minLength: 6 });
-  const managed = (item: BackupRecord) => ['managed_pre_update', 'managed_pre_restore'].includes(item.reason);
-  const create = async () => { try { const password = await passphrase(); if (password === null) return; await adminApi.createBackup(password); notify({ kind: 'success', text: '加密 .pgbak 备份已创建' }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const preview = async (item: BackupRecord) => { try { const password = managed(item) ? '' : await passphrase(); if (password === null) return; const result = await adminApi.previewBackup(item.id, password); await dialog.alert({ title: '备份内容预览', message: JSON.stringify(result.preview, null, 2) }); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const restore = async (item: BackupRecord) => { if (!await dialog.confirm({ title: '确认恢复备份', message: '恢复前会自动创建快照；恢复后当前会话可能失效。确定继续？' })) return; try { const password = managed(item) ? '' : await passphrase(); if (password === null) return; const result = await adminApi.restoreBackup(item.id, password); notify({ kind: 'success', text: result.message }); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  const upload = async (file?: File) => { if (!file) return; try { await adminApi.uploadBackup(file); notify({ kind: 'success', text: '备份已上传，可先预览再恢复' }); await load(); } catch (error) { notify({ kind: 'error', text: message(error) }); } };
-  return <><PageHeading kicker="Encrypted migration" title="全站备份与迁移" description="AES-256-GCM 加密核心业务数据与 CDK 密钥；更新前快照由本机安全托管密钥保护，手动备份密码最低 6 位。" action={<><label className="admin-ghost">上传 .pgbak<input type="file" accept=".pgbak" hidden onChange={event => void upload(event.target.files?.[0])} /></label><button className="admin-primary" onClick={create}>创建手动备份</button></>} /><section className="admin-panel admin-table-panel"><div className="admin-table-wrap"><table><thead><tr><th>文件</th><th>原因</th><th>大小</th><th>时间</th><th>操作</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td>{item.filename}</td><td>{managed(item) ? '本机自动快照' : item.reason}</td><td>{Math.ceil(item.size_bytes / 1024)} KB</td><td>{formatDate(item.created_at)}</td><td><a className="admin-ghost" href={`/api/admin/backups/${item.id}/download`}>下载</a> <button className="admin-ghost" onClick={() => preview(item)}>预览</button> <button className="admin-ghost" onClick={() => restore(item)}>恢复</button></td></tr>)}</tbody></table>{!items.length && <Empty text="暂无备份记录" />}</div>{pager}</section></>;
-}
+function BackupsPage({ notify }: { notify: (notice: Notice) => void }) { return <BackupManagement notify={notify} />; }
 
 function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   const dialog = useAdminDialog();
@@ -353,11 +300,7 @@ function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   </>;
 }
 
-function AuditPage({ notify }: { notify: (notice: Notice) => void }) {
-  const { items, setItems, load, pager, pagination } = usePagedList<AuditRecord, Awaited<ReturnType<typeof adminApi.audit>>>(adminApi.audit, notify);
-  const dialog = useAdminDialog();
-  return <><PageHeading kicker="Audit trail" title="操作审计" description="关键后台操作、登录和安全事件均保留服务端审计记录。" action={<button className="admin-ghost" onClick={load}><RefreshCw size={15} /> 刷新</button>} /><section className="admin-panel admin-table-panel"><div className="admin-table-wrap"><table><thead><tr><th>时间</th><th>管理员</th><th>操作</th><th>目标</th><th>IP</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td>{formatDate(item.created_at)}</td><td>{item.username || '系统/访客'}</td><td><code>{item.action}</code></td><td>{item.target_type || '—'} {item.target_id ? `· ${item.target_id.slice(0, 8)}` : ''}</td><td>{item.ip || '—'}</td></tr>)}</tbody></table>{!items.length && <Empty text="暂无审计记录" />}</div>{pager}</section></>;
-}
+function AuditPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Notice) => void }) { return <AuditManagement admin={admin} notify={notify} />; }
 
 function AccountPage({ admin, onChanged, notify }: { admin: AdminIdentity; onChanged: (admin: AdminIdentity) => void; notify: (notice: Notice) => void }) {
   const [form, setForm] = useState({ username: admin.username, currentPassword: '', newPassword: '' });

@@ -66,9 +66,9 @@ test('admin pagination, centered dialogs, cancellation, manual updates and theme
     const size = document.querySelector<HTMLSelectElement>('[aria-label="每页条数"]')!;
     await act(async () => { size.value = '10'; size.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); await settle();
     assert.equal(document.querySelectorAll('tbody tr').length, 10);
-    await click('审核'); dialog(); assert.equal(document.activeElement?.tagName, 'INPUT');
+    await click('审核'); dialog(); assert.equal(dialog().querySelectorAll('select').length, 1);
     await click('取消', dialog()); assert.equal(requests.filter(item => item.method === 'PUT').length, 0);
-    await click('审核'); await click('确认', dialog());
+    await click('审核'); await click('保存', dialog());
     assert.equal(requests.filter(item => item.path.endsWith('/review')).length, 1); await dismiss();
     await click('资源推荐'); await click('删除'); await click('取消', dialog());
     assert.equal(requests.filter(item => item.method === 'DELETE').length, 0);

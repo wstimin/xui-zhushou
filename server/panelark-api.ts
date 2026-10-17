@@ -10,6 +10,7 @@ import { attachJobSse, PanelArkJobEngine } from "./panelark-jobs.js";
 import { getPanelAdapter, getPanelAdapterSteps, listPanelAdapters, PanelAdapterOperation } from "./panel-adapters.js";
 import { registerCatalogAdapters } from "./catalog-adapters.js";
 import { encryptCdkCode, mountCdkManagement } from "./cdk-management.js";
+import { mountAdminManagement } from './admin-management.js';
 import { automaticFinalSteps, automaticSteps, executeAutomaticDeployment } from './automatic-deployment.js';
 import { backupFilePath, backupLimits, backupPassphraseForRecord, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup, saveManagedBackup } from "./panelark-backup.js";
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
@@ -51,7 +52,7 @@ type AuthenticatedRequest = Request & { panelarkAdmin?: AdminContext };
 
 const PERMISSIONS: Record<AdminRole, Set<string>> = {
   super_admin: new Set(["*"]),
-  operator: new Set(["dashboard:read", "cdk:read", "cdk:write", "cdk:export", "settings:read", "settings:write", "catalog:write", "resources:write", "jobs:read", "jobs:review", "audit:read"]),
+  operator: new Set(["dashboard:read", "cdk:read", "cdk:write", "cdk:export", "settings:read", "settings:write", "catalog:write", "resources:write", "jobs:read", "jobs:review", "jobs:cancel", "audit:read"]),
   support: new Set(["dashboard:read", "cdk:read", "cdk:release", "settings:read", "jobs:read", "jobs:review", "audit:read"]),
 };
 
@@ -76,8 +77,8 @@ function clearSessionCookie(req: Request, res: Response) {
 
 function audit(db: PanelArkDatabase, req: Request, action: string, targetType?: string, targetId?: string, details?: unknown, adminId?: string) {
   db.run(
-    "INSERT INTO audit_logs(admin_id, action, target_type, target_id, ip, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [adminId || null, action, targetType || null, targetId || null, req.ip || null, jsonDetails(details), now()],
+    "INSERT INTO audit_logs(admin_id, actor_name, action, target_type, target_id, ip, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [adminId || null, adminId ? db.get('SELECT username FROM admins WHERE id=?', [adminId])?.username || null : null, action, targetType || null, targetId || null, req.ip || null, jsonDetails(details), now()],
   );
 }
 
@@ -161,6 +162,7 @@ function ensureSetupToken(db: PanelArkDatabase, dataDirectory: string) {
 }
 
 function seedCatalog(db: PanelArkDatabase) {
+  if (db.get("SELECT key FROM site_settings WHERE key='cdk_default_seeded'")) return;
   if (!db.get("SELECT id FROM cdk_packages LIMIT 1")) {
     const timestamp = now();
     db.run(
@@ -168,6 +170,7 @@ function seedCatalog(db: PanelArkDatabase) {
       ["pkg-single", "单次部署", "允许完成一次面板或工具部署", timestamp, timestamp],
     );
   }
+  db.run("INSERT INTO site_settings(key,value,updated_at) VALUES ('cdk_default_seeded','true',?)", [now()]);
 }
 
 function getPublicSettings(db: PanelArkDatabase) {
@@ -661,6 +664,12 @@ export async function mountPanelArkApi(app: Express) {
 
   router.use("/admin", auth);
   router.use("/admin", requireCsrf);
+  mountAdminManagement(router, db, jobEngine, dataDirectory, {
+    permission: requirePermission,
+    actor: req => (req as AuthenticatedRequest).panelarkAdmin!,
+    audit: (req, action, type, id, details) => audit(db, req, action, type, id, details, (req as AuthenticatedRequest).panelarkAdmin!.id),
+    updateState: () => updateManager.status(),
+  });
 
   router.get("/admin/session", (req: AuthenticatedRequest, res) => {
     const state = db.get<DbRow>("SELECT totp_enabled FROM admins WHERE id = ?", [req.panelarkAdmin!.id]);
@@ -723,6 +732,7 @@ export async function mountPanelArkApi(app: Express) {
       const packageId = text(req.body?.packageId, 80);
       const cdkPackage = db.get<DbRow>("SELECT * FROM cdk_packages WHERE id = ?", [packageId]);
       if (!cdkPackage) throw new Error("请选择有效套餐");
+      if (Number(cdkPackage.enabled) !== 1) throw new Error('此套餐已停用，不能生成新的 CDK');
       const quantity = Number(req.body?.quantity ?? 1);
       if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 500) throw new Error('生成数量需为 1 至 500 的整数');
       const batchId = randomUUID();
@@ -772,6 +782,16 @@ export async function mountPanelArkApi(app: Express) {
         site_notice: text(req.body?.siteNotice, 500),
         admin_path: adminPath,
       };
+      if (req.body?.siteName !== undefined) {
+        const name = text(req.body.siteName, 80);
+        if (!name) throw new Error('站点名称不能为空');
+        updates.site_name = name;
+      }
+      if (req.body?.siteUrl !== undefined) {
+        const url = text(req.body.siteUrl, 500);
+        if (url) { const parsed = new URL(url); if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('站点地址需为不含账号密码的 HTTP/HTTPS 地址'); }
+        updates.site_url = url;
+      }
       db.transaction(() => {
         for (const [key, value] of Object.entries(updates)) db.run("INSERT OR REPLACE INTO site_settings(key, value, updated_at) VALUES (?, ?, ?)", [key, value, now()]);
       });
@@ -781,7 +801,7 @@ export async function mountPanelArkApi(app: Express) {
   });
 
   router.get("/admin/admins", requirePermission("*"), (req, res) => {
-    res.json({ success: true, ...pagedSql(db, req, "SELECT id, username, role, enabled, created_at, updated_at FROM admins ORDER BY created_at, id", "SELECT COUNT(*) AS total FROM admins") });
+    res.json({ success: true, ...pagedSql(db, req, "SELECT id, username, role, enabled, totp_enabled, created_at, updated_at FROM admins ORDER BY created_at, id", "SELECT COUNT(*) AS total FROM admins") });
   });
 
   router.post("/admin/admins", requirePermission("*"), async (req: AuthenticatedRequest, res) => {
@@ -825,13 +845,14 @@ export async function mountPanelArkApi(app: Express) {
   router.put("/admin/catalog/:id", requirePermission("catalog:write"), (req: AuthenticatedRequest, res) => {
     try {
       const id = text(req.params.id, 80);
-      const base = getPanelAdapter(id)?.metadata;
+      const base = catalogItems(db).find(item => item.id === id);
       if (!base) throw new Error("面板适配器不存在");
       const name = text(req.body?.name, 80) || base.name;
       const description = text(req.body?.description, 500) || base.description;
       const category = text(req.body?.category, 80) || base.category;
       const enabled = req.body?.enabled === undefined ? base.enabled : bool(req.body.enabled);
-      const sortOrder = Math.max(0, Math.min(10_000, Number(req.body?.sortOrder ?? 100)));
+      const sortOrder = Number(req.body?.sortOrder ?? base.sortOrder);
+      if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) throw new Error('排序需为 0 至 10000 的整数');
       db.run(
         `INSERT OR REPLACE INTO catalog_overrides(adapter_id, name, description, category, enabled, sort_order, updated_by, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -849,14 +870,18 @@ export async function mountPanelArkApi(app: Express) {
   router.post("/admin/resources", requirePermission("resources:write"), (req: AuthenticatedRequest, res) => {
     try {
       const url = text(req.body?.url, 500);
-      if (new URL(url).protocol !== "https:") throw new Error("推荐链接必须使用 HTTPS");
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("推荐链接必须使用不含账号密码的 HTTPS 地址");
+      const title = text(req.body?.title, 80), sortOrder = Number(req.body?.sortOrder ?? req.body?.sort_order ?? 100);
+      if (!title) throw new Error('推荐标题不能为空');
+      if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) throw new Error('排序需为 0 至 10000 的整数');
       const type = text(req.body?.type, 20) || "other";
       if (!["vps", "domain", "cdn", "other"].includes(type)) throw new Error("推荐资源类型无效");
       const id = randomUUID();
       db.run(
         `INSERT INTO recommended_resources(id, type, title, description, badge, url, enabled, sort_order, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, type, text(req.body?.title, 80), text(req.body?.description, 300), text(req.body?.badge, 40), url, bool(req.body?.enabled ?? true) ? 1 : 0, Number(req.body?.sortOrder || 100), now(), now()],
+        [id, type, title, text(req.body?.description, 300), text(req.body?.badge, 40), url, bool(req.body?.enabled ?? true) ? 1 : 0, sortOrder, now(), now()],
       );
       audit(db, req, "resource.create", "resource", id, { type, url }, req.panelarkAdmin!.id);
       res.status(201).json({ success: true, id });
@@ -869,12 +894,16 @@ export async function mountPanelArkApi(app: Express) {
       const existing = db.get<DbRow>("SELECT * FROM recommended_resources WHERE id = ?", [id]);
       if (!existing) throw new Error("推荐资源不存在");
       const url = text(req.body?.url ?? existing.url, 500);
-      if (new URL(url).protocol !== "https:") throw new Error("推荐链接必须使用 HTTPS");
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("推荐链接必须使用不含账号密码的 HTTPS 地址");
+      const title = text(req.body?.title ?? existing.title, 80), sortOrder = Number(req.body?.sortOrder ?? req.body?.sort_order ?? existing.sort_order);
+      if (!title) throw new Error('推荐标题不能为空');
+      if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) throw new Error('排序需为 0 至 10000 的整数');
       const type = text(req.body?.type ?? existing.type, 20);
       if (!["vps", "domain", "cdn", "other"].includes(type)) throw new Error("推荐资源类型无效");
       db.run(
         `UPDATE recommended_resources SET type = ?, title = ?, description = ?, badge = ?, url = ?, enabled = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
-        [type, text(req.body?.title ?? existing.title, 80), text(req.body?.description ?? existing.description, 300), text(req.body?.badge ?? existing.badge, 40), url, bool(req.body?.enabled ?? existing.enabled) ? 1 : 0, Number(req.body?.sortOrder ?? existing.sort_order), now(), id],
+        [type, title, text(req.body?.description ?? existing.description, 300), text(req.body?.badge ?? existing.badge, 40), url, bool(req.body?.enabled ?? existing.enabled) ? 1 : 0, sortOrder, now(), id],
       );
       audit(db, req, "resource.update", "resource", id, { type, url }, req.panelarkAdmin!.id);
       res.json({ success: true });
@@ -883,17 +912,26 @@ export async function mountPanelArkApi(app: Express) {
 
   router.delete("/admin/resources/:id", requirePermission("resources:write"), (req: AuthenticatedRequest, res) => {
     const id = text(req.params.id, 80);
+    if (!db.get('SELECT id FROM recommended_resources WHERE id=?', [id])) return res.status(404).json({ success: false, error: '推荐资源不存在' });
     db.run("DELETE FROM recommended_resources WHERE id = ?", [id]);
     audit(db, req, "resource.delete", "resource", id, {}, req.panelarkAdmin!.id);
     res.json({ success: true });
   });
 
   router.get("/admin/jobs", requirePermission("jobs:read"), (req, res) => {
+    const conditions: string[] = [], params: string[] = [];
+    const search = text(req.query.search, 180), status = text(req.query.status, 30), reviewStatus = text(req.query.reviewStatus, 30);
+    if (search) { conditions.push('(j.id LIKE ? OR j.server_key LIKE ? OR j.kind LIKE ?)'); params.push(...Array(3).fill(`%${search.replace(/[\\%_]/g, '\\$&')}%`)); }
+    if (status) { conditions.push('j.status = ?'); params.push(status); }
+    if (reviewStatus) { conditions.push("COALESCE(r.status,'pending') = ?"); params.push(reviewStatus); }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    // Search terms are bound values; escape LIKE metacharacters rather than treating them as patterns.
+    const filter = where.replace(/LIKE \?/g, "LIKE ? ESCAPE '\\'");
     const result = pagedSql(db, req,
       `SELECT j.id, j.kind, j.status, j.recovery_status, j.progress, j.error_message, j.task_key, j.created_at, j.updated_at,
               r.status AS review_status, r.refund_status, r.note
-       FROM deployment_jobs j LEFT JOIN job_reviews r ON r.job_id = j.id ORDER BY j.created_at DESC, j.id`,
-      "SELECT COUNT(*) AS total FROM deployment_jobs",
+       FROM deployment_jobs j LEFT JOIN job_reviews r ON r.job_id = j.id${filter} ORDER BY j.created_at DESC, j.id`,
+      `SELECT COUNT(*) AS total FROM deployment_jobs j LEFT JOIN job_reviews r ON r.job_id=j.id${filter}`, params,
     );
     res.json({ success: true, ...result });
   });
@@ -910,7 +948,7 @@ export async function mountPanelArkApi(app: Express) {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [existing?.id || randomUUID(), jobId, status, existing?.refund_status || "none", text(req.body?.note, 1000), req.panelarkAdmin!.id, existing?.created_at || now(), now()],
       );
-      audit(db, req, "job.review", "deployment_job", jobId, { status }, req.panelarkAdmin!.id);
+      audit(db, req, "job.review", "deployment_job", jobId, { status, note: text(req.body?.note, 1000) }, req.panelarkAdmin!.id);
       res.json({ success: true });
     } catch (error) { sendError(res, error, 404); }
   });
@@ -918,13 +956,15 @@ export async function mountPanelArkApi(app: Express) {
   router.post("/admin/jobs/:id/refund", requirePermission("jobs:review"), (req: AuthenticatedRequest, res) => {
     try {
       const jobId = text(req.params.id, 80);
-      const job = db.get<DbRow>("SELECT id, task_key FROM deployment_jobs WHERE id = ?", [jobId]);
+      const job = db.get<DbRow>("SELECT id, task_key, status FROM deployment_jobs WHERE id = ?", [jobId]);
       if (!job?.task_key) throw new Error("任务没有可返还的 CDK 记录");
+      if (['queued','running','cancelling'].includes(String(job.status))) throw new Error('任务尚未结束，请先取消并等待安全停止后再返还次数');
       const result = db.transaction(() => {
         const grant = db.get<DbRow>("SELECT id, cdk_id, status FROM cdk_grants WHERE task_key = ?", [job.task_key]);
         if (!grant) throw new Error("找不到任务对应的 CDK 权益");
         const review = db.get<DbRow>("SELECT id, refund_status, created_at FROM job_reviews WHERE job_id = ?", [jobId]);
         if (review?.refund_status === "refunded") return { alreadyRefunded: true };
+        const alreadyRefunded = !['consumed','locked'].includes(String(grant.status));
         if (grant.status === "consumed") db.run("UPDATE cdks SET used_count = MAX(0, used_count - 1), updated_at = ? WHERE id = ?", [now(), grant.cdk_id]);
         if (["consumed", "locked"].includes(String(grant.status))) db.run("UPDATE cdk_grants SET status = 'released', released_at = ? WHERE id = ?", [now(), grant.id]);
         db.run(
@@ -932,7 +972,7 @@ export async function mountPanelArkApi(app: Express) {
            VALUES (?, ?, 'resolved', 'refunded', ?, ?, ?, ?)`,
           [review?.id || randomUUID(), jobId, text(req.body?.note, 1000) || "售后审核返还 CDK 权益", req.panelarkAdmin!.id, review?.created_at || now(), now()],
         );
-        return { alreadyRefunded: false };
+        return { alreadyRefunded };
       });
       audit(db, req, "job.refund", "deployment_job", jobId, result, req.panelarkAdmin!.id);
       res.json({ success: true, ...result });
@@ -1091,6 +1131,8 @@ export async function mountPanelArkApi(app: Express) {
   });
 
   router.post("/admin/backups/:id/restore", requirePermission("*"), (req: AuthenticatedRequest, res) => {
+    if (db.get("SELECT id FROM deployment_jobs WHERE status IN ('queued','running','cancelling') LIMIT 1")) return res.status(409).json({ success: false, error: '请先停止正在执行的部署任务，再恢复数据库备份' });
+    if (['downloading','prepared','applying','restarting'].includes(updateManager.status().phase)) return res.status(409).json({ success: false, error: '系统正在更新，请更新结束后再恢复备份' });
     const secretPath = path.join(dataDirectory, "panelark.secret");
     const previousDatabase = db.exportBytes();
     const previousSecret = fs.readFileSync(secretPath);
@@ -1138,7 +1180,7 @@ export async function mountPanelArkApi(app: Express) {
   });
 
   router.get("/admin/audit", requirePermission("audit:read"), (req, res) => {
-    res.json({ success: true, ...pagedSql(db, req, "SELECT l.*, a.username FROM audit_logs l LEFT JOIN admins a ON a.id = l.admin_id ORDER BY l.id DESC", "SELECT COUNT(*) AS total FROM audit_logs") });
+    res.json({ success: true, ...pagedSql(db, req, "SELECT l.*, COALESCE(l.actor_name, a.username) username FROM audit_logs l LEFT JOIN admins a ON a.id = l.admin_id ORDER BY l.id DESC", "SELECT COUNT(*) AS total FROM audit_logs") });
   });
 
   const scheduledBackupTimer = setInterval(() => {

@@ -116,3 +116,12 @@
 .admin-dialog{transition:opacity 180ms cubic-bezier(.23,1,.32,1),transform 180ms cubic-bezier(.23,1,.32,1)}
 @media(prefers-reduced-motion:reduce){.admin-dialog{transition:none}}
 @media(max-width:560px){.admin-dialog-backdrop{padding:16px}.admin-dialog{padding:22px;max-height:calc(100dvh - 32px)}.admin-pagination{align-items:flex-start}.admin-pagination>div{flex-wrap:wrap}}
+.management-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.management-actions .admin-ghost { white-space: nowrap; }
+.management-detail { line-height: 1.7; overflow-wrap: anywhere; }
+.management-detail h3 { margin: 24px 0 10px; }
+.management-events { max-height: 220px; overflow: auto; }
+.management-events p { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.management-note { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.management-note p { white-space: pre-wrap; }
+.management-json { white-space: pre-wrap; overflow-wrap: anywhere; }
