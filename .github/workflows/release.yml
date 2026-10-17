@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Compact admin workspace with CDK package and batch tabs and on-demand creation forms|Keep both warm themes existing typography and all management permissions|Move secondary row actions into keyboard-accessible overflow-safe menus|Reduce card whitespace and add collapsible update logs and security details|Retest every management workflow through real HTTP SQLite files and reload"
+          PANELARK_RELEASE_NOTES: "Fix false missing-signing-key warnings when entering the update page|Distinguish loading failed reads and genuinely missing signing keys|Load security reports independently without delaying version information|Abort stale requests on navigation and add bounded read timeouts|Retest delayed reads navigation theme switching manual updates and automatic page reload"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

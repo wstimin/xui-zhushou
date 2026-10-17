@@ -147,5 +147,5 @@ export const adminApi = {
   prepareUpdate: () => api<{ success: true; state: UpdateState }>('/update/prepare', { method: 'POST', body: '{}' }),
   applyUpdate: () => api<{ success: true; state: UpdateState }>('/update/apply', { method: 'POST', body: '{}' }),
   updateAdapters: () => api<{ success: true; version: string; updated: number }>('/update/adapters', { method: 'POST', body: '{}' }),
-  securityReport: () => api<{ success: true; report: SecurityReport }>('/security/report'),
+  securityReport: (signal?: AbortSignal) => api<{ success: true; report: SecurityReport }>('/security/report', { signal }),
 };

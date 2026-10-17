@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity, ArrowLeft, Check, Clipboard, Cog, FileClock, Gauge, KeyRound, Layers3,
   LoaderCircle, LogOut, Menu, PackagePlus, RefreshCw, ShieldCheck, TicketCheck, UserCog,
@@ -284,13 +284,56 @@ function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   const dialog = useAdminDialog();
   const [state, setState] = useState<UpdateState | null>(null);
   const [adapterVersion, setAdapterVersion] = useState('built-in');
-  const [signingConfigured, setSigningConfigured] = useState(false);
+  const [signingConfigured, setSigningConfigured] = useState<boolean | null>(null);
   const [updatePolicy, setUpdatePolicy] = useState({ supported: true, hint: '' });
   const [security, setSecurity] = useState<SecurityReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [statusError, setStatusError] = useState('');
+  const [securityError, setSecurityError] = useState('');
+  const mounted = useRef(false);
+  const statusPending = useRef(false);
+  const statusRequest = useRef<AbortController | null>(null);
+  const securityRequest = useRef<AbortController | null>(null);
   const refreshWarning = useUpdatePageReload(state);
-  const load = useCallback((reportError = true) => Promise.all([adminApi.updateStatus(), adminApi.securityReport().catch(() => null)]).then(([result, securityResult]) => { setState(result.state); setAdapterVersion(result.adapterCatalogVersion); setSigningConfigured(result.signingConfigured); setUpdatePolicy({ supported: result.applicationUpdateSupported, hint: result.applicationUpdateHint }); if (securityResult) setSecurity(securityResult.report); }).catch(error => { if (reportError) notify({ kind: 'error', text: message(error) }); }), [notify]);
-  useEffect(() => { void load(); }, [load]);
+  const load = useCallback(async (includeSecurity = true) => {
+    if (!includeSecurity && statusPending.current) return;
+    statusRequest.current?.abort();
+    const request = new AbortController();
+    statusRequest.current = request;
+    statusPending.current = true;
+    setLoading(true); setStatusError('');
+    const timeout = window.setTimeout(() => request.abort(), 15000);
+    // Security checks are independent: they must never delay version/signature information.
+    if (includeSecurity) {
+      securityRequest.current?.abort();
+      const reportRequest = new AbortController();
+      securityRequest.current = reportRequest;
+      setSecurityError('');
+      const reportTimeout = window.setTimeout(() => reportRequest.abort(), 15000);
+      void adminApi.securityReport(reportRequest.signal).then(result => {
+        if (mounted.current && securityRequest.current === reportRequest) setSecurity(result.report);
+      }).catch(error => {
+        if (mounted.current && securityRequest.current === reportRequest) setSecurityError(reportRequest.signal.aborted ? '读取安全报告超时，请刷新状态重试' : message(error));
+      }).finally(() => window.clearTimeout(reportTimeout));
+    }
+    try {
+      const result = await adminApi.updateStatus(request.signal);
+      if (!mounted.current || statusRequest.current !== request) return;
+      setState(result.state); setAdapterVersion(result.adapterCatalogVersion); setSigningConfigured(result.signingConfigured);
+      setUpdatePolicy({ supported: result.applicationUpdateSupported, hint: result.applicationUpdateHint });
+    } catch (error) {
+      if (mounted.current && statusRequest.current === request) setStatusError(request.signal.aborted ? '读取更新状态超时，请检查网络后刷新状态重试' : message(error));
+    } finally {
+      window.clearTimeout(timeout);
+      if (statusRequest.current === request) statusPending.current = false;
+      if (mounted.current && statusRequest.current === request) setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    mounted.current = true; void load();
+    return () => { mounted.current = false; statusRequest.current?.abort(); securityRequest.current?.abort(); };
+  }, [load]);
   useEffect(() => {
     if (!state || !['downloading', 'applying', 'restarting'].includes(state.phase)) return;
     const timer = window.setInterval(() => void load(false), 4000);
@@ -302,14 +345,16 @@ function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   const terminal = state && ['completed', 'rolled_back', 'failed'].includes(state.phase);
   const activeUpdate = Boolean(state && !state.error && ['downloading', 'applying', 'restarting'].includes(state.phase));
   const progressLabel = activeUpdate ? `${state?.progress ?? 0}%` : state?.phase === 'completed' ? '已完成' : state?.phase === 'prepared' ? '待应用' : state?.phase === 'failed' ? '失败' : state?.phase === 'rolled_back' ? '已回滚' : '未运行';
-  return <><PageHeading kicker="Signed updates" title="系统更新与回滚" description="只接受受信任 Ed25519 签名清单和 SHA-256 匹配的构建包；更新状态保存在独立数据目录，服务重启后仍可继续读取。" action={<button className="admin-ghost" onClick={() => void load()}><RefreshCw size={15} /> 刷新状态</button>} />
-    {!signingConfigured && <div className="admin-inline-notice error">未找到正式发布签名公钥，在线更新已安全禁用。请使用正式发布包或配置 PANELARK_UPDATE_PUBLIC_KEY。</div>}
+  const pendingLabel = statusError ? '读取失败' : '读取中';
+  return <><PageHeading kicker="Signed updates" title="系统更新与回滚" description="只接受受信任 Ed25519 签名清单和 SHA-256 匹配的构建包；更新状态保存在独立数据目录，服务重启后仍可继续读取。" action={<button className="admin-ghost" disabled={loading || busy} onClick={() => void load()}><RefreshCw size={15} /> 刷新状态</button>} />
+    {statusError && <div className="admin-inline-notice error" role="alert">无法读取更新状态：{statusError}。请点击“刷新状态”重试。</div>}
+    {signingConfigured === false && !loading && !statusError && <div className="admin-inline-notice error">未找到正式发布签名公钥，在线更新已安全禁用。请使用正式发布包或配置 PANELARK_UPDATE_PUBLIC_KEY。</div>}
     {!updatePolicy.supported && <div className="admin-inline-notice">{updatePolicy.hint}</div>}
     {refreshWarning && <div className="admin-inline-notice error" role="alert">{refreshWarning}<button className="admin-ghost" onClick={() => window.location.reload()}>重新加载页面</button></div>}
-    <div className="admin-stat-grid admin-update-strip"><article className="admin-stat"><span><RefreshCw size={18} /></span><small>当前版本</small><strong>{state?.currentVersion || '—'}</strong></article><article className="admin-stat"><span><ShieldCheck size={18} /></span><small>签名状态</small><strong>{signingConfigured ? '可信' : '未配置'}</strong></article><article className="admin-stat"><span><Layers3 size={18} /></span><small>适配器目录</small><strong>{adapterVersion}</strong></article><article className="admin-stat"><span><Activity size={18} /></span><small>更新状态</small><strong>{progressLabel}</strong></article></div>
-    <div className="admin-two-column"><section className="admin-panel"><PanelTitle icon={RefreshCw} title="更新控制" subtitle={`正式版仅使用稳定更新通道；检测只读取版本信息，确认安装后自动完成备份、下载、校验、应用与重启。当前 ${state?.currentVersion || '—'} · 目标 ${state?.targetVersion || '未检查'}`} /><div className="modal-actions"><button className="admin-ghost" disabled={busy || !signingConfigured || Boolean(state && ['downloading', 'applying', 'restarting'].includes(state.phase))} onClick={check}>检测更新</button>{updatePolicy.supported && ['available', 'prepared'].includes(state?.phase || '') && <button className="admin-primary" disabled={busy} onClick={update}>{state?.phase === 'prepared' ? '继续安装更新' : '下载并安装更新'}</button>}</div>{state?.manifest?.adapterCatalog && <button className="admin-ghost" disabled={busy} onClick={adapters}>独立更新适配器目录至 {state.manifest.adapterCatalog.version}</button>}</section><section className="admin-panel"><PanelTitle icon={Activity} title="真实更新状态" subtitle={state?.updatedAt ? `最后更新 ${formatDate(state.updatedAt)}` : '等待检查'} />{activeUpdate && <div className="progress-track large"><div style={{ width: `${state?.progress ?? 0}%` }}><span /></div></div>}<p className={terminal && state?.phase === 'failed' ? 'admin-warning' : 'admin-readonly'}>{state?.message || '尚未检查更新'}</p>{state?.preUpdateBackup && <p className="admin-readonly">更新前自动备份：<code>{state.preUpdateBackup}</code></p>}{state?.error && <p className="admin-warning">{state.error}</p>}</section></div>
+    <div className="admin-stat-grid admin-update-strip" aria-busy={loading}><article className="admin-stat"><span><RefreshCw size={18} /></span><small>当前版本</small><strong>{state?.currentVersion || pendingLabel}</strong></article><article className="admin-stat"><span><ShieldCheck size={18} /></span><small>签名状态</small><strong>{statusError || signingConfigured === null ? pendingLabel : signingConfigured ? '可信' : '未配置'}</strong></article><article className="admin-stat"><span><Layers3 size={18} /></span><small>适配器目录</small><strong>{state ? adapterVersion : pendingLabel}</strong></article><article className="admin-stat"><span><Activity size={18} /></span><small>更新状态</small><strong>{state ? progressLabel : pendingLabel}</strong></article></div>
+    <div className="admin-two-column"><section className="admin-panel"><PanelTitle icon={RefreshCw} title="更新控制" subtitle={`正式版仅使用稳定更新通道；检测只读取版本信息，确认安装后自动完成备份、下载、校验、应用与重启。当前 ${state?.currentVersion || pendingLabel} · 目标 ${state?.targetVersion || '未检查'}`} /><div className="modal-actions"><button className="admin-ghost" disabled={busy || loading || Boolean(statusError) || !signingConfigured || Boolean(state && ['downloading', 'applying', 'restarting'].includes(state.phase))} onClick={check}>检测更新</button>{updatePolicy.supported && ['available', 'prepared'].includes(state?.phase || '') && <button className="admin-primary" disabled={busy || loading || Boolean(statusError) || !signingConfigured} onClick={update}>{state?.phase === 'prepared' ? '继续安装更新' : '下载并安装更新'}</button>}</div>{state?.manifest?.adapterCatalog && <button className="admin-ghost" disabled={busy || loading || Boolean(statusError) || !signingConfigured} onClick={adapters}>独立更新适配器目录至 {state.manifest.adapterCatalog.version}</button>}</section><section className="admin-panel"><PanelTitle icon={Activity} title="真实更新状态" subtitle={state?.updatedAt ? `最后更新 ${formatDate(state.updatedAt)}` : pendingLabel} />{activeUpdate && <div className="progress-track large"><div style={{ width: `${state?.progress ?? 0}%` }}><span /></div></div>}<p className={terminal && state?.phase === 'failed' ? 'admin-warning' : 'admin-readonly'}>{state?.message || (statusError ? '更新状态读取失败，请刷新状态重试' : '正在读取更新状态…')}</p>{state?.preUpdateBackup && <p className="admin-readonly">更新前自动备份：<code>{state.preUpdateBackup}</code></p>}{state?.error && <p className="admin-warning">{state.error}</p>}</section></div>
     <details className="admin-panel admin-table-panel admin-disclosure"><summary><PanelTitle icon={FileClock} title="更新事件" subtitle="服务重启后继续从持久化状态读取" /></summary><div className="admin-table-wrap"><table><thead><tr><th>时间</th><th>阶段</th><th>进度</th><th>说明</th></tr></thead><tbody>{[...(state?.events || [])].reverse().map((event, index) => <tr key={`${event.at}-${index}`}><td>{formatDate(event.at)}</td><td><code>{event.phase}</code></td><td>{event.progress}%</td><td>{event.message}</td></tr>)}</tbody></table>{!state?.events.length && <Empty text="暂无更新事件" />}</div></details>
-    <details className="admin-panel admin-table-panel admin-disclosure"><summary><PanelTitle icon={ShieldCheck} title="安全基线检查" subtitle={security ? `${security.failed} 项失败 · ${security.warnings} 项建议` : '正在读取'} /></summary><div className="admin-table-wrap"><table><thead><tr><th>检查项</th><th>结果</th><th>说明</th></tr></thead><tbody>{security?.checks.map(check => <tr key={check.id}><td>{check.label}</td><td><span className={`admin-status ${check.status === 'pass' ? 'active' : check.status === 'fail' ? 'disabled' : 'refunded'}`}>{check.status === 'pass' ? '通过' : check.status === 'fail' ? '失败' : '建议'}</span></td><td>{check.detail}</td></tr>)}</tbody></table></div></details>
+    <details className="admin-panel admin-table-panel admin-disclosure"><summary><PanelTitle icon={ShieldCheck} title="安全基线检查" subtitle={securityError ? `读取失败：${securityError}` : security ? `${security.failed} 项失败 · ${security.warnings} 项建议` : '正在读取'} /></summary><div className="admin-table-wrap"><table><thead><tr><th>检查项</th><th>结果</th><th>说明</th></tr></thead><tbody>{security?.checks.map(check => <tr key={check.id}><td>{check.label}</td><td><span className={`admin-status ${check.status === 'pass' ? 'active' : check.status === 'fail' ? 'disabled' : 'refunded'}`}>{check.status === 'pass' ? '通过' : check.status === 'fail' ? '失败' : '建议'}</span></td><td>{check.detail}</td></tr>)}</tbody></table></div></details>
   </>;
 }
 
