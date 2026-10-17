@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { adminApi, type UpdateState } from './api';
 
 declare const __PANELARK_BUILD_VERSION__: string;
@@ -46,6 +46,9 @@ export function createUpdateRefreshCheck(dependencies: RefreshDependencies) {
 
 export function useUpdatePageReload(state: UpdateState | null) {
   const [warning, setWarning] = useState('');
+  // Phase changes recreate this effect. Navigation must remain latched across
+  // those effect instances until the document actually unloads.
+  const navigationStarted = useRef(false);
   const phase = state?.phase;
   useEffect(() => {
     const loadedVersion = loadedBuildVersion();
@@ -64,13 +67,17 @@ export function useUpdatePageReload(state: UpdateState | null) {
       },
       status: signal => adminApi.updateStatus(signal),
       url: () => window.location.href,
-      replace: target => window.location.replace(target),
+      replace: target => {
+        if (navigationStarted.current) return;
+        navigationStarted.current = true;
+        window.location.replace(target);
+      },
       warn: setWarning,
     });
     let controller: AbortController | undefined;
     const probe = () => {
       // Never overlap health probes, even when focus and a timer arrive together.
-      if (controller) return;
+      if (controller || navigationStarted.current) return;
       const next = new AbortController(); controller = next;
       const timeout = window.setTimeout(() => next.abort(), 8000);
       void check.check(next.signal).finally(() => { window.clearTimeout(timeout); if (controller === next) controller = undefined; });
