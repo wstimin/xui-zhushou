@@ -131,11 +131,16 @@ export function CatalogPage({
       <div className="page-hero">
         <div><span className="eyebrow plain">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>
         <div className="catalog-access-actions">
-        <div className={`connection-card ${serverConnected ? 'connected' : deploymentUnlocked ? 'unlocked' : ''}`}>
-          <div className="connection-icon">{deploymentUnlocked ? <Server size={20} /> : <LockKeyhole size={20} />}</div>
-          <div><small>{deploymentUnlocked ? '目标服务器' : '当前权限'}</small><strong>{serverEnvironment?.targetHost || (deploymentUnlocked ? '等待连接' : '只读浏览')}</strong></div>
-          <div className="connection-actions"><button onClick={onConnect}>{serverConnected ? '更换服务器' : deploymentUnlocked ? '填写服务器' : '验证 CDK'}</button><PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} /></div>
-        </div>
+          <div className="catalog-access-row">
+            <div className={`connection-card ${serverConnected ? 'connected' : deploymentUnlocked ? 'unlocked' : ''}`} role="status">
+              <div className="connection-icon">{deploymentUnlocked ? <Server size={19} /> : <LockKeyhole size={19} />}</div>
+              <div className="connection-copy"><small>{deploymentUnlocked ? '目标服务器' : '当前权限'}</small><strong title={serverEnvironment?.targetHost}>{serverEnvironment?.targetHost || (deploymentUnlocked ? '等待连接' : '只读浏览')}</strong></div>
+            </div>
+            <div className="connection-actions" role="group" aria-label="部署操作">
+              <button className="button button-primary" onClick={onConnect}>{deploymentUnlocked ? <Server size={16} /> : <KeyRound size={16} />}{serverConnected ? '更换服务器' : deploymentUnlocked ? '填写服务器' : '验证 CDK'}</button>
+              <PurchaseLink enabled={purchaseEnabled} text={purchaseButtonText} />
+            </div>
+          </div>
         {cdkGrant && deploymentUnlocked && <div className="cdk-usage" role="status">{cdkGrant.packageName} · 总次数 {cdkGrant.totalUses ?? '—'} · 已用 {cdkGrant.usedCount ?? '—'} · 剩余 {cdkGrant.remaining} 次{Boolean(cdkGrant.lockedCount) && `（另有 ${cdkGrant.lockedCount} 次使用中）`}</div>}
         </div>
       </div>

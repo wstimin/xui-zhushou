@@ -706,7 +706,7 @@ async function startServer() {
       if (req.method !== "GET" || (req.path !== "/install" && !isAdminPagePath(req.path, readAdminPath(panelArk.db)))) return next();
       try {
         const html = await vite.transformIndexHtml(req.originalUrl, pageHtml(sourceHtml, req.path));
-        res.status(200).type("html").send(html);
+        res.set('Cache-Control', 'no-store').status(200).type("html").send(html);
       } catch (error) {
         vite.ssrFixStacktrace(error as Error);
         next(error);
@@ -719,7 +719,7 @@ async function startServer() {
     app.get(["/server.cjs", "/panel-admin.cjs"], (_req, res) => res.sendStatus(404));
     app.use(express.static(distPath, { index: false }));
     app.get("*", (req, res) => {
-      res.status(200).type("html").send(pageHtml(indexHtml, req.path));
+      res.set('Cache-Control', 'no-store').status(200).type("html").send(pageHtml(indexHtml, req.path));
     });
   }
 

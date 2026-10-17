@@ -18,7 +18,8 @@ if (process.argv.includes("--verify-installed")) {
   const installed = await bootstrap(input); assert.equal(installed.status, 200);
   const body = await installed.json(); const cookie = installed.headers.get("set-cookie")?.split(";")[0]; assert.ok(cookie); assert.equal(body.adminPath, "/smoke-console");
   const session = await fetch(`${base}/api/admin/session`, { headers: { cookie } }); assert.equal(session.status, 200);
-  assert.match(await (await fetch(`${base}${body.adminPath}`)).text(), /data-panelark-view="admin"/);
+  const adminPage = await fetch(`${base}${body.adminPath}`); assert.equal(adminPage.headers.get('cache-control'), 'no-store');
+  assert.match(await adminPage.text(), /data-panelark-view="admin"/);
   assert.equal((await (await fetch(`${base}/api/setup/status`)).json()).required, false);
   assert.equal((await bootstrap(input)).status, 400);
   const config = await (await fetch(`${base}/api/public/config`)).json(); assert.equal(config.siteName, "Smoke site"); assert.equal(config.siteUrl, base);

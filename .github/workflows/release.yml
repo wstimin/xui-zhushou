@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Streamlined public navigation and independent resource recommendations|Automatic server preparation installation and administrator login verification without extra user confirmations|Page-only deployment results never auto-close and cannot be restored after refresh|CDK total used locked and remaining counts are shown before and after installation"
+          PANELARK_RELEASE_NOTES: "Reload the update page once only after the new version is healthy and completed|Prevent reload loops and stale HTML without refreshing on update checks or failures|Separate permission status from standalone verification and purchase controls with responsive warm-theme spacing"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

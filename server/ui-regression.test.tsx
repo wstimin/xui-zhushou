@@ -133,6 +133,20 @@ test('only the CDK verification rows provide purchase entries; header has no hom
   assert.doesNotMatch(renderToStaticMarkup(<CatalogPage {...common} purchaseEnabled={false} items={[]} title="目录" eyebrow="Catalog" description="test" onDeploy={noop} onConnect={noop} />), /href="\/api\/public\/purchase"/);
 });
 
+test('catalog permission status and standalone purchase/verification actions are separate and counts remain visible', () => {
+  const render = (purchaseEnabled: boolean, unlocked: boolean) => new JSDOM(renderToStaticMarkup(<CatalogPage deploymentUnlocked={unlocked} serverConnected={false} purchaseEnabled={purchaseEnabled} purchaseButtonText="购买 CDK" items={[]} title="面板部署" eyebrow="Catalog" description="test" onDeploy={noop} onConnect={noop} cdkGrant={unlocked ? { grantToken: 'fixture', packageName: '正式套餐', totalUses: 10, usedCount: 2, remaining: 7, lockedCount: 1, expiresInMinutes: 30 } : null} />));
+  for (const unlocked of [false, true]) {
+    const dom = render(true, unlocked), document = dom.window.document;
+    const status = document.querySelector('.connection-card')!, actions = document.querySelector('.connection-actions')!;
+    assert.equal(status.parentElement, actions.parentElement); assert.equal(status.querySelector('button,a'), null);
+    assert.equal(actions.querySelectorAll('.button').length, 2); assert.match(actions.textContent!, unlocked ? /填写服务器/ : /验证 CDK/);
+    assert.equal(actions.querySelector('a')?.getAttribute('href'), '/api/public/purchase');
+    if (unlocked) assert.match(document.querySelector('.cdk-usage')!.textContent!, /总次数 10 · 已用 2 · 剩余 7 次/);
+    dom.window.close();
+  }
+  const disabled = render(false, false); assert.equal(disabled.window.document.querySelectorAll('.connection-actions .button').length, 1); disabled.window.close();
+});
+
 test('recommended resources have an independent section and no demonstration entries', () => {
   const empty = renderToStaticMarkup(<ResourcesPage items={[]} />);
   assert.match(empty, /暂无推荐资源/); assert.doesNotMatch(empty, /全球 VPS|域名与 DNS/);

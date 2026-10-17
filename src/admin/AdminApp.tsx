@@ -18,6 +18,7 @@ import { ThemeToggle, useTheme } from '../panelark/theme';
 import type { Theme } from '../panelark/types';
 import { PanelArkMark } from '../components/PanelArkMark';
 import { CdkCodesDialog, CdkManagementTable } from './CdkManagement';
+import { updateReloadParameter, useUpdatePageReload } from './update-refresh';
 
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
@@ -37,7 +38,7 @@ function AdminAppContent() {
   const [theme, toggleTheme] = useTheme();
   const [state, setState] = useState<'loading' | 'bootstrap' | 'login' | 'ready'>('loading');
   const [admin, setAdmin] = useState<AdminIdentity | null>(null);
-  const [view, setView] = useState<AdminView>('overview');
+  const [view, setView] = useState<AdminView>(() => new URLSearchParams(window.location.search).has(updateReloadParameter) ? 'update' : 'overview');
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -327,11 +328,12 @@ function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   const [updatePolicy, setUpdatePolicy] = useState({ supported: true, hint: '' });
   const [security, setSecurity] = useState<SecurityReport | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback((reportError = true) => Promise.all([adminApi.updateStatus(), adminApi.securityReport()]).then(([result, securityResult]) => { setState(result.state); setAdapterVersion(result.adapterCatalogVersion); setSigningConfigured(result.signingConfigured); setUpdatePolicy({ supported: result.applicationUpdateSupported, hint: result.applicationUpdateHint }); setSecurity(securityResult.report); }).catch(error => { if (reportError) notify({ kind: 'error', text: message(error) }); }), [notify]);
+  const refreshWarning = useUpdatePageReload(state);
+  const load = useCallback((reportError = true) => Promise.all([adminApi.updateStatus(), adminApi.securityReport().catch(() => null)]).then(([result, securityResult]) => { setState(result.state); setAdapterVersion(result.adapterCatalogVersion); setSigningConfigured(result.signingConfigured); setUpdatePolicy({ supported: result.applicationUpdateSupported, hint: result.applicationUpdateHint }); if (securityResult) setSecurity(securityResult.report); }).catch(error => { if (reportError) notify({ kind: 'error', text: message(error) }); }), [notify]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!state || !['downloading', 'applying', 'restarting'].includes(state.phase)) return;
-    const timer = window.setInterval(() => void load(false), 2000);
+    const timer = window.setInterval(() => void load(false), 4000);
     return () => window.clearInterval(timer);
   }, [state?.phase, load]);
   const check = async () => { setBusy(true); try { const result = await adminApi.checkUpdate(); setState(result.state); notify({ kind: 'success', text: `${result.state.message}。检测不会下载或安装；如有新版本，请手动点击更新按钮。` }); } catch (error) { notify({ kind: 'error', text: message(error) }); await load(); } finally { setBusy(false); } };
@@ -343,6 +345,7 @@ function UpdatePage({ notify }: { notify: (notice: Notice) => void }) {
   return <><PageHeading kicker="Signed updates" title="系统更新与回滚" description="只接受受信任 Ed25519 签名清单和 SHA-256 匹配的构建包；更新状态保存在独立数据目录，服务重启后仍可继续读取。" action={<button className="admin-ghost" onClick={() => void load()}><RefreshCw size={15} /> 刷新状态</button>} />
     {!signingConfigured && <div className="admin-inline-notice error">未找到正式发布签名公钥，在线更新已安全禁用。请使用正式发布包或配置 PANELARK_UPDATE_PUBLIC_KEY。</div>}
     {!updatePolicy.supported && <div className="admin-inline-notice">{updatePolicy.hint}</div>}
+    {refreshWarning && <div className="admin-inline-notice error" role="alert">{refreshWarning}<button className="admin-ghost" onClick={() => window.location.reload()}>重新加载页面</button></div>}
     <div className="admin-stat-grid"><article className="admin-stat"><span><RefreshCw size={18} /></span><small>当前版本</small><strong>{state?.currentVersion || '—'}</strong></article><article className="admin-stat"><span><ShieldCheck size={18} /></span><small>签名状态</small><strong>{signingConfigured ? '可信' : '未配置'}</strong></article><article className="admin-stat"><span><Layers3 size={18} /></span><small>适配器目录</small><strong>{adapterVersion}</strong></article><article className="admin-stat"><span><Activity size={18} /></span><small>更新状态</small><strong>{progressLabel}</strong></article></div>
     <div className="admin-two-column"><section className="admin-panel"><PanelTitle icon={RefreshCw} title="更新控制" subtitle={`正式版仅使用稳定更新通道；检测只读取版本信息，确认安装后自动完成备份、下载、校验、应用与重启。当前 ${state?.currentVersion || '—'} · 目标 ${state?.targetVersion || '未检查'}`} /><div className="modal-actions"><button className="admin-ghost" disabled={busy || !signingConfigured || Boolean(state && ['downloading', 'applying', 'restarting'].includes(state.phase))} onClick={check}>检测更新</button>{updatePolicy.supported && ['available', 'prepared'].includes(state?.phase || '') && <button className="admin-primary" disabled={busy} onClick={update}>{state?.phase === 'prepared' ? '继续安装更新' : '下载并安装更新'}</button>}</div>{state?.manifest?.adapterCatalog && <button className="admin-ghost" disabled={busy} onClick={adapters}>独立更新适配器目录至 {state.manifest.adapterCatalog.version}</button>}</section><section className="admin-panel"><PanelTitle icon={Activity} title="真实更新状态" subtitle={state?.updatedAt ? `最后更新 ${formatDate(state.updatedAt)}` : '等待检查'} />{activeUpdate && <div className="progress-track large"><div style={{ width: `${state?.progress ?? 0}%` }}><span /></div></div>}<p className={terminal && state?.phase === 'failed' ? 'admin-warning' : 'admin-readonly'}>{state?.message || '尚未检查更新'}</p>{state?.preUpdateBackup && <p className="admin-readonly">更新前自动备份：<code>{state.preUpdateBackup}</code></p>}{state?.error && <p className="admin-warning">{state.error}</p>}</section></div>
     <section className="admin-panel admin-table-panel"><PanelTitle icon={FileClock} title="更新事件" subtitle="服务重启后继续从持久化状态读取" /><div className="admin-table-wrap"><table><thead><tr><th>时间</th><th>阶段</th><th>进度</th><th>说明</th></tr></thead><tbody>{[...(state?.events || [])].reverse().map((event, index) => <tr key={`${event.at}-${index}`}><td>{formatDate(event.at)}</td><td><code>{event.phase}</code></td><td>{event.progress}%</td><td>{event.message}</td></tr>)}</tbody></table>{!state?.events.length && <Empty text="暂无更新事件" />}</div></section>
