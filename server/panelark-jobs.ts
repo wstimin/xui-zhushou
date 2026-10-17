@@ -173,15 +173,16 @@ export class PanelArkJobEngine {
     this.recoverOrphans();
   }
 
-  recoverOrphans() {
-    const orphaned = this.db.all<DbRow>("SELECT id FROM deployment_jobs WHERE status IN ('running','cancelling')");
+  recoverOrphans(restoredSnapshot = false) {
+    const statuses = restoredSnapshot ? "('queued','running','cancelling')" : "('running','cancelling')";
+    const orphaned = this.db.all<DbRow>(`SELECT id FROM deployment_jobs WHERE status IN ${statuses}`);
     for (const row of orphaned) {
       const jobId = String(row.id);
       const timestamp = now();
       this.db.transaction(() => {
-        this.db.run("UPDATE deployment_jobs SET status = 'interrupted', recovery_status = 'manual', error_message = ?, residue_json = ?, updated_at = ?, finished_at = ? WHERE id = ? AND status IN ('running','cancelling')", [
-          "服务进程在任务执行期间重启，任务未自动续跑",
-          JSON.stringify({ reason: "backend_restart", action: "请检查目标服务器后再安全重试" }), timestamp, timestamp, jobId,
+        this.db.run(`UPDATE deployment_jobs SET status = 'interrupted', recovery_status = 'manual', error_message = ?, residue_json = ?, updated_at = ?, finished_at = ? WHERE id = ? AND status IN ${statuses}`, [
+          restoredSnapshot ? '此任务来自恢复的历史备份，没有可继续执行的现场会话；请核对目标服务器后处理售后' : "服务进程在任务执行期间重启，任务未自动续跑",
+          JSON.stringify({ reason: restoredSnapshot ? 'backup_restore' : "backend_restart", action: "请检查目标服务器后再安全重试" }), timestamp, timestamp, jobId,
         ]);
         this.db.run("UPDATE deployment_steps SET status = CASE WHEN status = 'running' THEN 'failed' ELSE status END, error_message = CASE WHEN status = 'running' THEN ? ELSE error_message END, finished_at = CASE WHEN status = 'running' THEN ? ELSE finished_at END WHERE job_id = ?", ["后端重启中断", timestamp, jobId]);
         this.db.run("DELETE FROM deployment_locks WHERE job_id = ?", [jobId]);

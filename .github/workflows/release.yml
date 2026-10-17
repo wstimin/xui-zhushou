@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Complete super-admin business management while preserving operator and support roles|Add task details, after-sales records CRUD, review states, export, safe cancellation and deletion|Complete package, batch, administrator, recommendation, backup and audit management|Fix database foreign keys after export and prevent premature or duplicate CDK refunds"
+          PANELARK_RELEASE_NOTES: "Verify every admin section through UI events real HTTP SQLite persistence and files|Fix catalog description clearing and stale package selection after deletion|Keep backup restore snapshots manageable and invalidate restored sessions|Mark historical active jobs interrupted after restore rather than leaving phantom running tasks"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

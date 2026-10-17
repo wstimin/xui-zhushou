@@ -170,6 +170,10 @@ test('administrators can recover, export, edit and delete CDKs with role, CSRF, 
     } finally { foreignDb.close(); }
     const uploaded = await json(await fetch(base + '/admin/backups/upload', { method: 'POST', headers: { ...ownerHeaders, 'content-type': 'application/octet-stream' }, body: new Uint8Array(foreignArchive) }));
     assert.equal((await admin(`/backups/${uploaded.id}/restore`, 'POST', { passphrase: '123456' })).status, 200);
+    assert.equal((await admin('/session')).status, 401, 'restoration revokes sessions contained in the archive');
+    const restoredLogin = await request('/admin/login', 'POST', { username: 'owner', password: '123456' });
+    const restoredSession = await json(restoredLogin); assert.equal(restoredLogin.status, 200);
+    ownerHeaders.cookie = restoredLogin.headers.get('set-cookie')!.split(';')[0]; ownerHeaders['x-csrf-token'] = restoredSession.csrfToken;
     assert.equal((await json(await admin(`/cdks/${retained.id}/reveal`, 'POST', {}))).code, retainedCode);
     assert.equal((await request('/cdk/validate', 'POST', { code: retainedCode })).status, 200);
   } finally {

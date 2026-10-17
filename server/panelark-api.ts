@@ -198,7 +198,7 @@ function catalogItems(db: PanelArkDatabase) {
     return {
       ...item,
       name: override?.name ? String(override.name) : item.name,
-      description: override?.description ? String(override.description) : item.description,
+      description: override?.description !== undefined && override.description !== null ? String(override.description) : item.description,
       category: override?.category ? String(override.category) : item.category,
       enabled: override ? Number(override.enabled) === 1 : item.enabled,
       sortOrder: override ? Number(override.sort_order) : index * 10,
@@ -847,9 +847,10 @@ export async function mountPanelArkApi(app: Express) {
       const id = text(req.params.id, 80);
       const base = catalogItems(db).find(item => item.id === id);
       if (!base) throw new Error("面板适配器不存在");
-      const name = text(req.body?.name, 80) || base.name;
-      const description = text(req.body?.description, 500) || base.description;
-      const category = text(req.body?.category, 80) || base.category;
+      const name = req.body?.name === undefined ? base.name : text(req.body.name, 80);
+      const description = req.body?.description === undefined ? base.description : text(req.body.description, 500);
+      const category = req.body?.category === undefined ? base.category : text(req.body.category, 80);
+      if (!name || !category) throw new Error('项目名称和分类不能为空');
       const enabled = req.body?.enabled === undefined ? base.enabled : bool(req.body.enabled);
       const sortOrder = Number(req.body?.sortOrder ?? base.sortOrder);
       if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000) throw new Error('排序需为 0 至 10000 的整数');
@@ -1134,8 +1135,8 @@ export async function mountPanelArkApi(app: Express) {
     if (db.get("SELECT id FROM deployment_jobs WHERE status IN ('queued','running','cancelling') LIMIT 1")) return res.status(409).json({ success: false, error: '请先停止正在执行的部署任务，再恢复数据库备份' });
     if (['downloading','prepared','applying','restarting'].includes(updateManager.status().phase)) return res.status(409).json({ success: false, error: '系统正在更新，请更新结束后再恢复备份' });
     const secretPath = path.join(dataDirectory, "panelark.secret");
-    const previousDatabase = db.exportBytes();
-    const previousSecret = fs.readFileSync(secretPath);
+    let previousDatabase: Buffer | undefined;
+    let previousSecret: Buffer | undefined;
     const previousPepper = pepper;
     try {
       const record = db.get<DbRow>("SELECT filename, reason FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
@@ -1144,20 +1145,35 @@ export async function mountPanelArkApi(app: Express) {
       const passphrase = backupPassphraseForRecord(dataDirectory, record.reason, req.body?.passphrase);
       const archive = fs.readFileSync(backupFilePath(dataDirectory, String(record.filename)));
       const payload = decryptBackup(archive, passphrase);
-      const snapshot = managed
-        ? saveManagedBackup(db, dataDirectory, "managed_pre_restore", req.panelarkAdmin!.id)
-        : saveBackup(db, dataDirectory, passphrase, "pre_restore", req.panelarkAdmin!.id);
       const restoredSecret = Buffer.from(payload.cdkPepper, "base64");
       if (restoredSecret.length < 16) throw new Error("备份中的 CDK 密钥无效");
       if (process.env.PANELARK_CDK_PEPPER?.trim() && !Buffer.from(process.env.PANELARK_CDK_PEPPER.trim(), 'utf8').equals(restoredSecret)) throw new Error('环境变量 PANELARK_CDK_PEPPER 与备份密钥不同，请先同步配置后再恢复');
+      const snapshot = managed
+        ? saveManagedBackup(db, dataDirectory, "managed_pre_restore", req.panelarkAdmin!.id)
+        : saveBackup(db, dataDirectory, passphrase, "pre_restore", req.panelarkAdmin!.id);
+      // Backup files belong to this server, not the historical database being restored.
+      // Retain their registry, including the source and just-created rollback snapshot.
+      const backupRecords = db.all('SELECT * FROM backup_records');
+      previousDatabase = db.exportBytes();
+      previousSecret = fs.readFileSync(secretPath);
       db.replaceFromBytes(Buffer.from(payload.database, "base64"));
       fs.writeFileSync(secretPath, restoredSecret, { mode: 0o600 });
       pepper = restoredSecret;
+      db.transaction(() => {
+        for (const backup of backupRecords) {
+          if (!fs.existsSync(backupFilePath(dataDirectory, String(backup.filename)))) continue;
+          const creator = backup.created_by && db.get('SELECT id FROM admins WHERE id=?', [backup.created_by]) ? backup.created_by : null;
+          db.run('INSERT OR REPLACE INTO backup_records(id,filename,reason,size_bytes,created_by,created_at,label) VALUES (?,?,?,?,?,?,?)', [backup.id,backup.filename,backup.reason,backup.size_bytes,creator,backup.created_at,backup.label || '']);
+        }
+        db.run('DELETE FROM admin_sessions');
+      });
+      jobEngine.recoverOrphans(true);
       const restoredAdminId = db.get("SELECT id FROM admins WHERE id = ?", [req.panelarkAdmin!.id]) ? req.panelarkAdmin!.id : undefined;
       audit(db, req, "backup.restore", "backup", text(req.params.id, 80), { preRestoreSnapshot: snapshot.filename, initiatedBy: req.panelarkAdmin!.username }, restoredAdminId);
-      res.json({ success: true, preRestoreSnapshot: snapshot.filename, message: "核心业务数据已恢复，请重新登录确认" });
+      clearSessionCookie(req, res);
+      res.json({ success: true, preRestoreSnapshot: snapshot.filename, adminPath: readAdminPath(db), message: "核心业务数据已恢复，请重新登录确认" });
     } catch (error) {
-      try { db.replaceFromBytes(previousDatabase); fs.writeFileSync(secretPath, previousSecret, { mode: 0o600 }); } catch { /* preserve original error */ }
+      try { if (previousDatabase && previousSecret) { db.replaceFromBytes(previousDatabase); fs.writeFileSync(secretPath, previousSecret, { mode: 0o600 }); } } catch { /* preserve original error */ }
       pepper = previousPepper;
       sendError(res, error, 409);
     }

@@ -41,6 +41,16 @@ function AdminAppContent() {
   const [admin, setAdmin] = useState<AdminIdentity | null>(null);
   const [view, setView] = useState<AdminView>(() => new URLSearchParams(window.location.search).has(updateReloadParameter) ? 'update' : 'overview');
   const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    const invalidated = (event: Event) => {
+      setAdmin(null); setState('login'); setView('overview');
+      const adminPath = (event as CustomEvent<{ adminPath?: string }>).detail?.adminPath;
+      const currentPath = window.location.pathname.replace(/\/+$/g, '') || '/';
+      if (adminPath && currentPath !== adminPath && !currentPath.startsWith(`${adminPath}/`)) window.location.assign(adminPath);
+    };
+    window.addEventListener('panelark-session-invalidated', invalidated);
+    return () => window.removeEventListener('panelark-session-invalidated', invalidated);
+  }, []);
 
   useEffect(() => {
     adminApi.bootstrapState().then(async ({ required }) => {
@@ -191,7 +201,7 @@ function CdkPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Not
     try {
       const options = await allPackageOptions();
       setPackages(options);
-      setBatchForm(current => ({ ...current, packageId: current.packageId || options.find(item => item.enabled)?.id || '' }));
+      setBatchForm(current => ({ ...current, packageId: options.some(item => item.id === current.packageId && item.enabled) ? current.packageId : options.find(item => item.enabled)?.id || '' }));
     } catch (error) { notify({ kind: 'error', text: message(error) }); }
   }, [notify]);
   useEffect(() => { void load(); }, [load]);

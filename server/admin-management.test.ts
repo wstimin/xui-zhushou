@@ -45,6 +45,16 @@ test('complete admin management: real HTTP CRUD, roles, atomicity, refunds, sess
       await admin(`/admins/${operatorId}`, 'PUT', { username: 'owner' }, 409);
       assert.equal(db.get('SELECT username FROM admins WHERE id=?', [operatorId])!.username, 'operator-renamed');
     });
+    await t.test('a newly created super administrator has the same real management powers as the initial owner', async () => {
+      const second = await admin('/admins','POST',{username:'second-owner',password:'123456',role:'super_admin'});
+      const headers = await login('second-owner');
+      for (const route of ['/admins','/settings','/backups','/audit','/update/status','/security/report','/jobs','/catalog','/resources']) assert.equal((await request('/admin'+route,'GET',undefined,headers)).status,200,route);
+      const created = await request('/admin/resources','POST',{title:'另一个超级管理员创建',url:'https://example.test',type:'other'},headers); assert.equal(created.status,201);
+      assert.equal((await request(`/admin/resources/${created.json.id}`,'PUT',{title:'修改成功'},headers)).status,200);
+      assert.equal(db.get('SELECT title FROM recommended_resources WHERE id=?',[created.json.id])!.title,'修改成功');
+      assert.equal((await request(`/admin/resources/${created.json.id}`,'DELETE',undefined,headers)).status,200);
+      await admin(`/admins/${second.id}`,'DELETE');
+    });
     await t.test('package full edits affect live CDK entitlements, batch rename works, unsafe quotas roll back', async () => {
       pkg = (await admin('/packages', 'POST', { name: '测试套餐', maxUses: 5, validityDays: 10 })).id;
       const b = await admin('/batches', 'POST', { packageId: pkg, quantity: 2, name: '测试批次' }); batch = b.batchId; code = b.codes[0];
@@ -73,6 +83,8 @@ test('complete admin management: real HTTP CRUD, roles, atomicity, refunds, sess
       await admin(`/catalog/${item.id}`, 'PUT', { name: '自定义项目', category: '建站', description: '介绍', sortOrder: 0, enabled: true });
       await admin(`/catalog/${item.id}`, 'PUT', { enabled: false });
       const saved = db.get('SELECT * FROM catalog_overrides WHERE adapter_id=?', [item.id])!; assert.equal(saved.name, '自定义项目'); assert.equal(saved.sort_order, 0); assert.equal(saved.enabled, 0);
+      await admin(`/catalog/${item.id}`, 'PUT', { description: '' });
+      assert.equal(db.get('SELECT description FROM catalog_overrides WHERE adapter_id=?', [item.id])!.description, '', 'clearing a description must persist rather than silently retaining old text');
       assert.notEqual((await request(`/admin/catalog/${item.id}`, 'PUT', { sortOrder: 'NaN' }, owner)).status, 200);
       await admin(`/catalog/${item.id}`, 'DELETE'); assert.equal(db.get('SELECT * FROM catalog_overrides WHERE adapter_id=?', [item.id]), undefined);
     });
@@ -122,6 +134,34 @@ test('complete admin management: real HTTP CRUD, roles, atomicity, refunds, sess
       await admin(`/backups/${copy.item.id}`, 'DELETE'); assert.ok(!fs.existsSync(path.join(directory, 'backups', copy.item.filename))); assert.ok(fs.readdirSync(path.join(directory, 'backups', '.trash')).some(f => f.endsWith(copy.item.filename)));
       assert.equal(db.get('SELECT id FROM backup_records WHERE id=?', [copy.item.id]), undefined);
       await admin(`/backups/${copy.item.id}`, 'DELETE', undefined, 409);
+    });
+    await t.test('restoring a backup preserves recoverable snapshots in the list and invalidates old sessions', async () => {
+      const before = await admin('/settings');
+      const b = await admin('/backups', 'POST', { passphrase: '123456' }, 201);
+      await admin('/settings', 'PUT', { ...before, siteNotice: '恢复前临时公告' });
+      const secretBefore=fs.readFileSync(path.join(directory,'panelark.secret'));
+      await admin(`/backups/${b.item.id}/restore`, 'POST', { passphrase: 'wrong-password' }, 409);
+      assert.equal((await admin('/settings')).siteNotice,'恢复前临时公告');
+      assert.deepEqual(fs.readFileSync(path.join(directory,'panelark.secret')),secretBefore);
+      assert.ok(db.get('SELECT id FROM admin_sessions WHERE admin_id=?',[boot.json.admin.id]),'failed restore must keep the working session');
+      const r = await admin(`/backups/${b.item.id}/restore`, 'POST', { passphrase: '123456' });
+      assert.ok(db.get('SELECT id FROM backup_records WHERE filename=?', [r.preRestoreSnapshot]), 'pre-restore snapshot must remain manageable after replacing the database');
+      assert.ok(db.get('SELECT id FROM backup_records WHERE id=?', [b.item.id]), 'source archive must not disappear from its management list');
+      assert.equal((await request('/admin/session', 'GET', undefined, owner)).status, 401, 'restoring must invalidate sessions captured in the backup');
+      Object.assign(owner, await login('owner'));
+      assert.equal((await admin('/settings')).siteNotice, before.siteNotice);
+    });
+    await t.test('restoring historical running tasks does not resurrect a phantom active deployment', async () => {
+      const job = jobEngine.createJob({ kind: 'restore-running-test', serverKey: 'snapshot-host', steps: [{ key: 'wait', title: '等待取消' }] });
+      const execution = jobEngine.startJob(job.id, async context => new Promise<void>((_resolve,reject) => context.signal.addEventListener('abort',()=>reject(context.signal.reason),{once:true})));
+      const b = await admin('/backups', 'POST', { passphrase: '123456' }, 201);
+      await admin(`/backups/${b.item.id}/restore`, 'POST', { passphrase: '123456' }, 409);
+      jobEngine.cancelJob(job.id); await execution;
+      await admin(`/backups/${b.item.id}/restore`, 'POST', { passphrase: '123456' });
+      Object.assign(owner, await login('owner'));
+      assert.equal(jobEngine.getJob(job.id)!.status, 'interrupted');
+      assert.equal(db.get('SELECT job_id FROM deployment_locks WHERE job_id=?', [job.id]), undefined);
+      await admin(`/jobs/${job.id}`, 'DELETE', { confirm: 'DELETE' });
     });
     await t.test('administrator password reset, 2FA reset, session revocation and real deletion retain audit attribution', async () => {
       const old = await login('operator-renamed'); await admin(`/admins/${operatorId}/password`, 'POST', { password: '654321' });

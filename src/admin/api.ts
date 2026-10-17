@@ -140,7 +140,7 @@ export const adminApi = {
   backups: (query: PageQuery = {}) => api<PageResult<BackupRecord>>(pagePath('/backups', query)),
   createBackup: (passphrase: string, reason = 'manual') => api<{ success: true; item: BackupRecord }>('/backups', { method: 'POST', body: JSON.stringify({ passphrase, reason }) }),
   previewBackup: (id: string, passphrase: string) => api<{ success: true; preview: Record<string, unknown> }>(`/backups/${id}/preview`, { method: 'POST', body: JSON.stringify({ passphrase }) }),
-  restoreBackup: (id: string, passphrase: string) => api<{ success: true; message: string; preRestoreSnapshot: string }>(`/backups/${id}/restore`, { method: 'POST', body: JSON.stringify({ passphrase }) }),
+  restoreBackup: (id: string, passphrase: string) => api<{ success: true; message: string; preRestoreSnapshot: string; adminPath: string }>(`/backups/${id}/restore`, { method: 'POST', body: JSON.stringify({ passphrase }) }),
   uploadBackup: (file: File) => api<{ success: true; id: string; filename: string }>('/backups/upload', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }),
   updateStatus: (signal?: AbortSignal) => api<{ success: true; state: UpdateState; adapterCatalogVersion: string; signingConfigured: boolean; applicationUpdateSupported: boolean; applicationUpdateHint: string }>('/update/status', { signal }),
   checkUpdate: () => api<{ success: true; state: UpdateState }>('/update/check', { method: 'POST', body: JSON.stringify({ channel: 'stable' }) }),
