@@ -17,6 +17,7 @@ import { allPackageOptions } from './api';
 import { ThemeToggle, useTheme } from '../panelark/theme';
 import type { Theme } from '../panelark/types';
 import { PanelArkMark } from '../components/PanelArkMark';
+import { CdkCodesDialog, CdkManagementTable } from './CdkManagement';
 
 type AdminView = 'overview' | 'jobs' | 'cdk' | 'catalog' | 'resources' | 'settings' | 'admins' | 'backups' | 'update' | 'audit' | 'account';
 type Notice = { kind: 'success' | 'error'; text: string } | null;
@@ -168,7 +169,7 @@ function OverviewPage({ notify }: { notify: (notice: Notice) => void }) {
       <AdminStat icon={Activity} label="待人工审核" value={stats?.jobsPendingReview} />
       <AdminStat icon={PackagePlus} label="推荐点击" value={stats?.resourceClicks} />
     </div>
-    <section className="admin-panel admin-welcome"><div><span className="admin-panel-icon"><Gauge size={21} /></span><h2>PanelArk 运营控制中心</h2><p>CDK 商业闭环、部署任务售后、动态目录、资源推荐、角色权限、2FA、会话审计与加密迁移均由真实服务端驱动。</p></div><div className="admin-security-list"><span><Check size={15} /> CDK 仅保存不可逆哈希</span><span><Check size={15} /> 管理会话使用 HttpOnly Cookie</span><span><Check size={15} /> 备份使用 AES-256-GCM 加密</span><span><Check size={15} /> 恢复前自动快照并支持失败回滚</span></div></section>
+    <section className="admin-panel admin-welcome"><div><span className="admin-panel-icon"><Gauge size={21} /></span><h2>PanelArk 运营控制中心</h2><p>CDK 商业闭环、部署任务售后、动态目录、资源推荐、角色权限、2FA、会话审计与加密迁移均由真实服务端驱动。</p></div><div className="admin-security-list"><span><Check size={15} /> CDK 加密保存，管理员可查看和导出</span><span><Check size={15} /> 管理会话使用 HttpOnly Cookie</span><span><Check size={15} /> 备份使用 AES-256-GCM 加密</span><span><Check size={15} /> 恢复前自动快照并支持失败回滚</span></div></section>
   </>;
 }
 
@@ -179,41 +180,37 @@ function AdminStat({ icon: Icon, label, value }: { icon: typeof Gauge; label: st
 function CdkPage({ admin, notify }: { admin: AdminIdentity; notify: (notice: Notice) => void }) {
   const writable = admin.role !== 'support';
   const [packages, setPackages] = useState<PackageRecord[]>([]);
-  const { items: cdks, load: loadCdks, pager, pagination } = usePagedList<CdkRecord, Awaited<ReturnType<typeof adminApi.cdks>>>(adminApi.cdks, notify);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [packageForm, setPackageForm] = useState({ name: '', description: '', maxUses: 1, validityDays: 30 });
   const [batchForm, setBatchForm] = useState({ packageId: '', name: '', quantity: 10 });
   const [generated, setGenerated] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     try {
-      const [options] = await Promise.all([allPackageOptions(), loadCdks()]);
+      const options = await allPackageOptions();
       setPackages(options);
       setBatchForm(current => ({ ...current, packageId: current.packageId || options.find(item => item.enabled)?.id || '' }));
     } catch (error) { notify({ kind: 'error', text: message(error) }); }
-  }, [notify, loadCdks]);
+  }, [notify]);
   useEffect(() => { void load(); }, [load]);
   const createPackage = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true);
-    try { await adminApi.createPackage(packageForm); setPackageForm({ name: '', description: '', maxUses: 1, validityDays: 30 }); notify({ kind: 'success', text: '套餐已创建' }); await load(); }
+    try { await adminApi.createPackage(packageForm); setPackageForm({ name: '', description: '', maxUses: 1, validityDays: 30 }); setRefreshKey(key => key + 1); notify({ kind: 'success', text: '套餐已创建' }); await load(); }
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
   const createBatch = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true);
-    try { const result = await adminApi.createBatch(batchForm); setGenerated(result.codes); await load(); }
+    try { const result = await adminApi.createBatch(batchForm); setGenerated(result.codes); setRefreshKey(key => key + 1); await load(); }
     catch (error) { notify({ kind: 'error', text: message(error) }); } finally { setBusy(false); }
   };
-  const updateStatus = async (id: string, status: CdkRecord['status']) => {
-    try { await adminApi.updateCdk(id, status); notify({ kind: 'success', text: 'CDK 状态已更新' }); await load(); }
-    catch (error) { notify({ kind: 'error', text: message(error) }); }
-  };
   return <>
-    <PageHeading kicker="Commercial access" title="CDK 管理" description="创建授权套餐、批量生成 CDK，并处理停用或返还。明文只显示一次。" action={<button className="admin-ghost" onClick={load}><RefreshCw size={15} /> 刷新</button>} />
+    <PageHeading kicker="Commercial access" title="CDK 管理" description="创建套餐、生成授权码，随时查看、复制、导出、编辑和删除；支持批次筛选与批量管理。" action={<button className="admin-ghost" onClick={() => { void load(); setRefreshKey(key => key + 1); }}><RefreshCw size={15} /> 刷新</button>} />
     {writable && <div className="admin-two-column">
       <form noValidate className="admin-panel" onSubmit={createPackage}><PanelTitle icon={PackagePlus} title="创建套餐" subtitle="定义次数和有效期" /><div className="admin-form-grid"><AdminInput label="套餐名称" value={packageForm.name} setValue={name => setPackageForm({ ...packageForm, name })} required /><AdminInput label="最多部署次数" type="number" value={String(packageForm.maxUses)} setValue={value => setPackageForm({ ...packageForm, maxUses: Number(value) })} required /><AdminInput label="有效天数" type="number" value={String(packageForm.validityDays)} setValue={value => setPackageForm({ ...packageForm, validityDays: Number(value) })} /><AdminInput label="说明" value={packageForm.description} setValue={description => setPackageForm({ ...packageForm, description })} /></div><button className="admin-primary" disabled={busy}>创建套餐</button></form>
       <form noValidate className="admin-panel" onSubmit={createBatch}><PanelTitle icon={KeyRound} title="批量生成" subtitle="最多一次生成 500 个" /><label className="admin-field"><span>选择套餐</span><select value={batchForm.packageId} onChange={event => setBatchForm({ ...batchForm, packageId: event.target.value })} required>{packages.filter(item => item.enabled).map(item => <option key={item.id} value={item.id}>{item.name} · {item.max_uses} 次</option>)}</select></label><div className="admin-form-grid"><AdminInput label="批次名称" value={batchForm.name} setValue={name => setBatchForm({ ...batchForm, name })} /><AdminInput label="生成数量" type="number" value={String(batchForm.quantity)} setValue={value => setBatchForm({ ...batchForm, quantity: Number(value) })} required /></div><button className="admin-primary" disabled={busy || !batchForm.packageId}>生成 CDK</button></form>
     </div>}
-    <section className="admin-panel admin-table-panel"><PanelTitle icon={TicketCheck} title="CDK 列表" subtitle={`共 ${pagination.total} 个记录`} /><div className="admin-table-wrap"><table><thead><tr><th>标识</th><th>套餐</th><th>使用</th><th>状态</th><th>有效期</th><th>操作</th></tr></thead><tbody>{cdks.map(item => <tr key={item.id}><td><code>{item.code_hint}</code></td><td>{item.package_name}</td><td>{item.used_count}/{item.max_uses}{item.locked_count > 0 && <small> · 锁定 {item.locked_count}</small>}</td><td><StatusBadge status={item.status} /></td><td>{formatDate(item.expires_at)}</td><td>{writable ? <select className="table-select" value={item.status} onChange={event => updateStatus(item.id, event.target.value as CdkRecord['status'])}><option value="active">启用</option><option value="disabled">停用</option><option value="refunded">已返还</option></select> : '只读'}</td></tr>)}</tbody></table>{!cdks.length && <Empty text="尚无 CDK 记录" />}</div>{pager}</section>
-    {generated && <CenteredModal title="立即保存这些 CDK" onClose={() => setGenerated(null)}><p className="admin-warning">明文只显示本次，关闭后无法再次查看。请立即安全保存。</p><textarea aria-label="本次生成的 CDK" readOnly value={generated.join('\u005cn')} /><div className="admin-dialog-actions"><button className="admin-ghost" onClick={() => void navigator.clipboard.writeText(generated.join('\u005cn')).catch(error => notify({ kind: 'error', text: message(error) }))}><Clipboard size={15} /> 复制全部</button><button className="admin-primary" onClick={() => setGenerated(null)}>我已安全保存</button></div></CenteredModal>}
+    <CdkManagementTable admin={admin} notify={notify} refreshKey={refreshKey} />
+    {generated && <CdkCodesDialog codes={generated} onClose={() => setGenerated(null)} notify={notify} />}
   </>;
 }
 

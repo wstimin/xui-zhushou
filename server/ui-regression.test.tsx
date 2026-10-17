@@ -166,5 +166,7 @@ test('admin and centered dialogs inherit the original warm ivory / warm black an
   }
   const admin = fs.readFileSync(new URL('../src/admin/AdminApp.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(admin, /window\.(alert|confirm|prompt)\(/);
-  assert.equal((admin.match(/\{pager\}/g) || []).length, 8);
+  const cdkManager = fs.readFileSync(new URL('../src/admin/CdkManagement.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(cdkManager, /window\.(alert|confirm|prompt)\(/);
+  assert.equal((`${admin}\n${cdkManager}`.match(/\{pager\}/g) || []).length, 8);
 });

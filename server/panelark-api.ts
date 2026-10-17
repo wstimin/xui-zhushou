@@ -9,6 +9,7 @@ import { mountPanelArkRemoteApi } from "./panelark-remote.js";
 import { attachJobSse, PanelArkJobEngine } from "./panelark-jobs.js";
 import { getPanelAdapter, getPanelAdapterSteps, listPanelAdapters, PanelAdapterOperation } from "./panel-adapters.js";
 import { registerCatalogAdapters } from "./catalog-adapters.js";
+import { encryptCdkCode, mountCdkManagement } from "./cdk-management.js";
 import { backupFilePath, backupLimits, backupPassphraseForRecord, backupPreview, createBackupArchive, decryptBackup, isBackupArchive, saveBackup, saveManagedBackup } from "./panelark-backup.js";
 import { loadUpdatePublicKey, PanelArkUpdateManager, UpdateChannel } from "./panelark-update.js";
 import { buildSecurityReport } from "./panelark-security-audit.js";
@@ -49,7 +50,7 @@ type AuthenticatedRequest = Request & { panelarkAdmin?: AdminContext };
 
 const PERMISSIONS: Record<AdminRole, Set<string>> = {
   super_admin: new Set(["*"]),
-  operator: new Set(["dashboard:read", "cdk:read", "cdk:write", "settings:read", "settings:write", "catalog:write", "resources:write", "jobs:read", "jobs:review", "audit:read"]),
+  operator: new Set(["dashboard:read", "cdk:read", "cdk:write", "cdk:export", "settings:read", "settings:write", "catalog:write", "resources:write", "jobs:read", "jobs:review", "audit:read"]),
   support: new Set(["dashboard:read", "cdk:read", "cdk:release", "settings:read", "jobs:read", "jobs:review", "audit:read"]),
 };
 
@@ -217,7 +218,7 @@ function publicCatalogItem(item: ReturnType<typeof catalogItems>[number]) {
 export async function mountPanelArkApi(app: Express) {
   const dataDirectory = path.resolve(process.env.PANELARK_DATA_DIR || path.join(process.cwd(), "data"));
   const db = await PanelArkDatabase.open(path.join(dataDirectory, "panelark.sqlite"));
-  const pepper = loadOrCreatePepper(dataDirectory);
+  let pepper = loadOrCreatePepper(dataDirectory);
   if (webInstallationEnabled()) ensureSetupToken(db, dataDirectory);
   seedCatalog(db);
   const jobEngine = new PanelArkJobEngine(db);
@@ -417,7 +418,7 @@ export async function mountPanelArkApi(app: Express) {
       const code = normalizeCdk(req.body?.code);
       if (!code.startsWith("PAK-") || code.length < 12) throw new Error("请输入有效的 PanelArk CDK");
       const row = db.get<DbRow>(
-        `SELECT c.id, c.used_count, c.status, c.expires_at, p.name AS package_name, p.max_uses,
+        `SELECT c.id, c.used_count, c.status, c.expires_at, p.name AS package_name, COALESCE(c.max_uses_override, p.max_uses) AS max_uses,
                 p.allowed_panel, p.allowed_category, p.enabled AS package_enabled
          FROM cdks c JOIN cdk_packages p ON p.id = c.package_id WHERE c.code_hash = ?`,
         [hashCdk(code, pepper)],
@@ -449,7 +450,7 @@ export async function mountPanelArkApi(app: Express) {
         cleanup(db);
         const grant = db.get<DbRow>(
           `SELECT g.id, g.cdk_id, g.status, g.task_key, g.expires_at, c.used_count, c.status AS cdk_status,
-                  c.expires_at AS cdk_expires_at, p.max_uses, p.enabled AS package_enabled
+                  c.expires_at AS cdk_expires_at, COALESCE(c.max_uses_override, p.max_uses) AS max_uses, p.enabled AS package_enabled
            FROM cdk_grants g JOIN cdks c ON c.id = g.cdk_id JOIN cdk_packages p ON p.id = c.package_id
            WHERE g.token_hash = ?`, [sha256(grantToken)],
         );
@@ -593,8 +594,10 @@ export async function mountPanelArkApi(app: Express) {
       const id = randomUUID();
       const name = text(req.body?.name, 80);
       if (!name) throw new Error("请输入套餐名称");
-      const maxUses = Math.max(1, Math.min(10_000, Number(req.body?.maxUses || 1)));
-      const validityDays = req.body?.validityDays ? Math.max(1, Math.min(3650, Number(req.body.validityDays))) : null;
+      const maxUses = Number(req.body?.maxUses ?? 1);
+      const validityDays = req.body?.validityDays ? Number(req.body.validityDays) : null;
+      if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > 10000) throw new Error('最多部署次数需为 1 至 10000 的整数');
+      if (validityDays !== null && (!Number.isSafeInteger(validityDays) || validityDays < 1 || validityDays > 3650)) throw new Error('有效天数需为 1 至 3650 的整数，0 表示永久有效');
       const timestamp = now();
       db.run(
         "INSERT INTO cdk_packages(id, name, description, max_uses, allowed_panel, allowed_category, validity_days, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
@@ -621,7 +624,8 @@ export async function mountPanelArkApi(app: Express) {
       const packageId = text(req.body?.packageId, 80);
       const cdkPackage = db.get<DbRow>("SELECT * FROM cdk_packages WHERE id = ?", [packageId]);
       if (!cdkPackage) throw new Error("请选择有效套餐");
-      const quantity = Math.max(1, Math.min(500, Number(req.body?.quantity || 1)));
+      const quantity = Number(req.body?.quantity ?? 1);
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 500) throw new Error('生成数量需为 1 至 500 的整数');
       const batchId = randomUUID();
       const timestamp = now();
       const codes: string[] = [];
@@ -631,40 +635,19 @@ export async function mountPanelArkApi(app: Express) {
           let code = generateCdkCode();
           while (db.get("SELECT id FROM cdks WHERE code_hash = ?", [hashCdk(code, pepper)])) code = generateCdkCode();
           const expiresAt = cdkPackage.validity_days ? new Date(Date.now() + Number(cdkPackage.validity_days) * 86_400_000).toISOString() : null;
-          db.run("INSERT INTO cdks(id, batch_id, package_id, code_hash, code_hint, status, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)", [randomUUID(), batchId, packageId, hashCdk(code, pepper), `…${code.slice(-4)}`, expiresAt, timestamp, timestamp]);
+          const id = randomUUID();
+          db.run("INSERT INTO cdks(id, batch_id, package_id, code_hash, code_hint, code_encrypted, status, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)", [id, batchId, packageId, hashCdk(code, pepper), `…${code.slice(-4)}`, encryptCdkCode(code, pepper, id), expiresAt, timestamp, timestamp]);
           codes.push(code);
         }
       });
       audit(db, req, "cdk.batch_create", "cdk_batch", batchId, { packageId, quantity }, req.panelarkAdmin!.id);
-      res.json({ success: true, batchId, codes, warning: "CDK 明文仅本次返回，请立即安全保存" });
+      res.set('Cache-Control', 'no-store').json({ success: true, batchId, codes, warning: "CDK 已加密保存，管理员可随时重新查看、复制和导出" });
     } catch (error) { sendError(res, error); }
   });
 
-  router.get("/admin/cdks", requirePermission("cdk:read"), (req, res) => {
-    const status = text(req.query.status, 20);
-    const params: string[] = [];
-    let where = "";
-    if (["active", "disabled", "refunded"].includes(status)) { where = "WHERE c.status = ?"; params.push(status); }
-    const result = pagedSql(db, req,
-      `SELECT c.id, c.code_hint, c.used_count, c.status, c.expires_at, c.created_at, p.name AS package_name, p.max_uses,
-              (SELECT COUNT(*) FROM cdk_grants g WHERE g.cdk_id = c.id AND g.status = 'locked' AND g.expires_at > ?) AS locked_count
-       FROM cdks c JOIN cdk_packages p ON p.id = c.package_id ${where} ORDER BY c.created_at DESC, c.id`,
-      `SELECT COUNT(*) AS total FROM cdks c JOIN cdk_packages p ON p.id = c.package_id ${where}`,
-      params, [now(), ...params],
-    );
-    res.json({ success: true, ...result });
-  });
-
-  router.patch("/admin/cdks/:id", requirePermission("cdk:write"), (req: AuthenticatedRequest, res) => {
-    try {
-      const id = text(req.params.id, 80);
-      const status = text(req.body?.status, 20);
-      if (!["active", "disabled", "refunded"].includes(status)) throw new Error("CDK 状态无效");
-      if (!db.get("SELECT id FROM cdks WHERE id = ?", [id])) throw new Error("CDK 不存在");
-      db.run("UPDATE cdks SET status = ?, updated_at = ? WHERE id = ?", [status, now(), id]);
-      audit(db, req, "cdk.status_update", "cdk", id, { status }, req.panelarkAdmin!.id);
-      res.json({ success: true });
-    } catch (error) { sendError(res, error); }
+  mountCdkManagement(router, db, () => pepper, {
+    permission: requirePermission,
+    audit: (req, action, target, details) => audit(db, req, action, 'cdk', target, details, (req as AuthenticatedRequest).panelarkAdmin!.id),
   });
 
   router.get("/admin/settings", requirePermission("settings:read"), (_req, res) => res.set("Cache-Control", "no-store").json({ success: true, ...getAdminSettings(db) }));
@@ -1012,6 +995,7 @@ export async function mountPanelArkApi(app: Express) {
     const secretPath = path.join(dataDirectory, "panelark.secret");
     const previousDatabase = db.exportBytes();
     const previousSecret = fs.readFileSync(secretPath);
+    const previousPepper = pepper;
     try {
       const record = db.get<DbRow>("SELECT filename, reason FROM backup_records WHERE id = ?", [text(req.params.id, 80)]);
       if (!record) throw new Error("备份不存在");
@@ -1024,13 +1008,16 @@ export async function mountPanelArkApi(app: Express) {
         : saveBackup(db, dataDirectory, passphrase, "pre_restore", req.panelarkAdmin!.id);
       const restoredSecret = Buffer.from(payload.cdkPepper, "base64");
       if (restoredSecret.length < 16) throw new Error("备份中的 CDK 密钥无效");
+      if (process.env.PANELARK_CDK_PEPPER?.trim() && !Buffer.from(process.env.PANELARK_CDK_PEPPER.trim(), 'utf8').equals(restoredSecret)) throw new Error('环境变量 PANELARK_CDK_PEPPER 与备份密钥不同，请先同步配置后再恢复');
       db.replaceFromBytes(Buffer.from(payload.database, "base64"));
       fs.writeFileSync(secretPath, restoredSecret, { mode: 0o600 });
+      pepper = restoredSecret;
       const restoredAdminId = db.get("SELECT id FROM admins WHERE id = ?", [req.panelarkAdmin!.id]) ? req.panelarkAdmin!.id : undefined;
       audit(db, req, "backup.restore", "backup", text(req.params.id, 80), { preRestoreSnapshot: snapshot.filename, initiatedBy: req.panelarkAdmin!.username }, restoredAdminId);
       res.json({ success: true, preRestoreSnapshot: snapshot.filename, message: "核心业务数据已恢复，请重新登录确认" });
     } catch (error) {
       try { db.replaceFromBytes(previousDatabase); fs.writeFileSync(secretPath, previousSecret, { mode: 0o600 }); } catch { /* preserve original error */ }
+      pepper = previousPepper;
       sendError(res, error, 409);
     }
   });

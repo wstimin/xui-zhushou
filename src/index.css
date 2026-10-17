@@ -110,3 +110,23 @@ button,input,textarea{color:inherit;font:inherit} button{border:0;cursor:pointer
 @media(max-width:800px){.catalog-access-actions{justify-content:flex-start}.catalog-access-actions .connection-card{min-width:0;flex-basis:280px}}
 @media(max-width:560px){.nav-wrap{gap:8px}.nav-actions{gap:6px}.nav-actions .access-pill{display:none}.header-purchase{max-width:116px;font-size:12px;padding:8px 9px;gap:5px}.header-purchase svg:last-child{display:none}.catalog-access-actions{gap:10px}.catalog-access-actions .connection-card{flex-basis:100%}.license-actions .purchase-button{justify-content:center}}
 .result-row-wrap>strong{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+
+/* CDK operations stay visible, readable, and consistent with both themes. */
+.cdk-list-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px}
+.cdk-list-heading h2{margin:0;font-size:19px}.cdk-list-heading p{margin:5px 0 0;color:var(--text-secondary);font-size:13px}
+.cdk-filters{display:grid;grid-template-columns:minmax(200px,2fr) repeat(3,minmax(120px,1fr)) auto auto;align-items:end;gap:12px;padding:0 24px 20px}
+.cdk-filters .admin-field{margin:0}.cdk-filters input,.cdk-filters select{min-height:40px}
+.cdk-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:16px 24px;border-top:1px solid var(--border);background:var(--bg-primary)}
+.cdk-toolbar label{display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:13px}
+.cdk-toolbar select{color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:9px}
+.cdk-toolbar-divider{height:22px;border-left:1px solid var(--border);margin:0 3px}
+.cdk-row-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:270px}.cdk-row-actions .admin-ghost{font-size:12px;min-height:34px;padding:7px 10px}
+.cdk-management .cdk-code{font-size:13px;white-space:nowrap;user-select:all}.cdk-row-note{display:block;margin-top:7px;color:var(--text-secondary);font-size:12px}
+.cdk-management input[type=checkbox]{min-width:17px;width:17px;height:17px;accent-color:var(--accent);cursor:pointer}
+.cdk-management .cdk-danger{color:var(--danger)}.cdk-management button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.cdk-management button:not(:disabled):active{transform:scale(.97)}.cdk-management button{transition:transform 120ms cubic-bezier(.23,1,.32,1)}
+.cdk-management button:focus-visible:active{transform:none}
+.cdk-edit-form .admin-field{margin-bottom:16px}.cdk-edit-form .admin-field small{line-height:1.7;color:var(--text-secondary)}
+@media(max-width:1200px){.cdk-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:600px){.cdk-list-heading{padding:18px}.cdk-filters{padding:0 18px 18px;grid-template-columns:1fr 1fr}.cdk-filters .admin-field:first-child{grid-column:1/-1}.cdk-toolbar{padding:14px 18px}.cdk-toolbar-divider{display:none}}
+@media(prefers-reduced-motion:reduce){.cdk-management button:not(:disabled):active{transform:none}.cdk-management button{transition:none}}

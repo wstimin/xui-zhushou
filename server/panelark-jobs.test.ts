@@ -29,7 +29,7 @@ test('category migration preserves existing 1Panel overrides and category-limite
     db.run("INSERT INTO catalog_overrides(adapter_id, category, enabled, sort_order, updated_at) VALUES ('1panel', '服务器面板', 0, 7, ?)", [timestamp]);
     db.run("INSERT INTO catalog_overrides(adapter_id, category, updated_at) VALUES ('aapanel', '我的分类', ?)", [timestamp]);
     db.run("INSERT INTO cdk_packages(id, name, allowed_category, created_at, updated_at) VALUES ('legacy', '旧套餐', '服务器面板', ?, ?)", [timestamp, timestamp]);
-    db.run('DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)');
+    db.run('DELETE FROM schema_migrations WHERE version = 5');
     db.close();
     reopened = await PanelArkDatabase.open(path.join(directory, 'panelark.sqlite'));
     assert.deepEqual(reopened.get("SELECT category, enabled, sort_order FROM catalog_overrides WHERE adapter_id = '1panel'"), { category: '建站面板', enabled: 0, sort_order: 7 });

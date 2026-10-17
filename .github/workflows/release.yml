@@ -152,7 +152,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Public catalog and deployment pages now show product requirements without internal acceptance labels|Public adapter APIs use an explicit field allowlist while admin metadata stays protected|Removed fabricated installation badges and added public information boundary regression checks"
+          PANELARK_RELEASE_NOTES: "Admins can reveal copy and export encrypted CDKs as TXT or CSV across all filtered pages|Added individual entitlement editing and confirmed single or bulk deletion and status controls|Legacy hashes keep working and can be bound to their matching original code for future recovery"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

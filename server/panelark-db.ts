@@ -245,6 +245,10 @@ const MIGRATIONS = [
     UPDATE cdk_packages SET allowed_category = '建站面板'
       WHERE allowed_category = '服务器面板';
   `,
+  `
+    ALTER TABLE cdks ADD COLUMN code_encrypted TEXT;
+    ALTER TABLE cdks ADD COLUMN max_uses_override INTEGER CHECK(max_uses_override IS NULL OR max_uses_override > 0);
+  `,
 ];
 
 export class PanelArkDatabase {

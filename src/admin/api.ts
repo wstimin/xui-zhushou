@@ -10,7 +10,12 @@ export interface PackageRecord {
 export interface CdkRecord {
   id: string; code_hint: string; used_count: number; status: 'active' | 'disabled' | 'refunded';
   expires_at?: string; created_at: string; package_name: string; max_uses: number; locked_count: number;
+  batch_id?: string; batch_name?: string; package_id: string; code_available: number;
 }
+export interface CdkFilters { search?: string; status?: string; packageId?: string; batchId?: string }
+export interface CdkSelection { ids?: string[]; scope?: 'filtered'; filters?: CdkFilters }
+export interface CdkBatch { id: string; name: string; quantity: number; package_id: string; package_name: string; created_at: string }
+export interface CdkExport { success: true; filename: string; mime: string; content: string; total: number; exported: number; unavailable: number }
 export interface AuditRecord {
   id: number; username?: string; action: string; target_type?: string; target_id?: string;
   ip?: string; details?: string; created_at: string;
@@ -77,8 +82,13 @@ export const adminApi = {
   createPackage: (payload: Record<string, unknown>) => api<{ success: true; id: string }>('/packages', { method: 'POST', body: JSON.stringify(payload) }),
   updatePackage: (id: string, enabled: boolean) => api<{ success: true }>(`/packages/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
   createBatch: (payload: { packageId: string; name: string; quantity: number }) => api<{ success: true; batchId: string; codes: string[]; warning: string }>('/batches', { method: 'POST', body: JSON.stringify(payload) }),
-  cdks: (query: PageQuery = {}) => api<PageResult<CdkRecord>>(pagePath('/cdks', query)),
-  updateCdk: (id: string, status: CdkRecord['status']) => api<{ success: true }>(`/cdks/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  cdks: (query: PageQuery & CdkFilters = {}) => api<PageResult<CdkRecord>>(`${pagePath('/cdks', query)}&${new URLSearchParams({ search: query.search || '', status: query.status || '', packageId: query.packageId || '', batchId: query.batchId || '' })}`),
+  batches: (query: PageQuery = {}) => api<PageResult<CdkBatch>>(pagePath('/batches', query)),
+  revealCdk: (id: string) => api<{ success: true; code: string }>(`/cdks/${id}/reveal`, { method: 'POST', body: '{}' }),
+  exportCdks: (selection: CdkSelection & { format: 'txt' | 'csv' }) => api<CdkExport>('/cdks/export', { method: 'POST', body: JSON.stringify(selection) }),
+  bulkCdks: (selection: CdkSelection & { action: 'status' | 'delete'; status?: CdkRecord['status'] }) => api<{ success: true; affected: number }>('/cdks/bulk', { method: 'POST', body: JSON.stringify(selection) }),
+  updateCdk: (id: string, payload: CdkRecord['status'] | { status: CdkRecord['status']; maxUses: number; usedCount: number; expiresAt: string | null; originalCode?: string }) => api<{ success: true }>(`/cdks/${id}`, { method: 'PATCH', body: JSON.stringify(typeof payload === 'string' ? { status: payload } : payload) }),
+  deleteCdk: (id: string) => api<{ success: true; affected: number }>(`/cdks/${id}`, { method: 'DELETE' }),
   settings: () => api<{ success: true } & AdminSettings>('/settings'),
   updateSettings: (payload: AdminSettings) => api<{ success: true } & AdminSettings>('/settings', { method: 'PUT', body: JSON.stringify(payload) }),
   admins: (query: PageQuery = {}) => api<PageResult<AdminRecord>>(pagePath('/admins', query)),
