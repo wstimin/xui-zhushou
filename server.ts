@@ -14,6 +14,7 @@ import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
 import { mountPanelArkApi } from "./server/panelark-api.js";
 import { isAdminPagePath, markAdminHtml, readAdminPath } from "./server/admin-path.js";
 import { installationRequired, webInstallationEnabled } from "./server/setup.js";
+import { ensureStandaloneShortcuts } from "./server/command-shortcuts.js";
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -143,6 +144,7 @@ function parseInstallerResult(output: string): Record<string, string> {
 }
 
 async function startServer() {
+  ensureStandaloneShortcuts();
   const app = express();
   const port = validPort(process.env.PORT, 1888);
   const host = process.env.HOST || "0.0.0.0";

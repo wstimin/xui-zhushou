@@ -99,6 +99,26 @@ install_assistant`, { installed: true });
   assert.equal(result.status, 0); assert.match(result.output, /不会重复安装/); assert.doesNotMatch(result.output, /UNEXPECTED_DEPS/);
 });
 
+shellTest("rerunning installation repairs missing entry points without packages, downloads or service changes", () => {
+  const result = shell(`mkdir -p "$TARGET_DIR/scripts"
+cp "$(dirname "$1")/scripts/command-shortcuts.mjs" "$TARGET_DIR/scripts/command-shortcuts.mjs"
+printf '#!/usr/bin/env bash\nprintf "FORWARDED:<%%s>\\n" "$@"\n' > "$TARGET_DIR/install.sh"
+install_base_deps() { echo UNEXPECTED_DEPS; exit 91; }
+download_release_package() { echo UNEXPECTED_DOWNLOAD; exit 92; }
+pm2() { echo UNEXPECTED_PM2; exit 93; }
+install_assistant
+test -x "$SHORTCUT_DIR/pa"; test -x "$SHORTCUT_DIR/sy"
+"$SHORTCUT_DIR/pa" status
+rm "$SHORTCUT_DIR/pa"
+INSTALL_MODE=update; EXPECTED_RELEASE_VERSION=2.2.1
+install_assistant
+test -x "$SHORTCUT_DIR/pa"
+"$SHORTCUT_DIR/sy" logs`, { installed: true });
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /FORWARDED:<status>/); assert.match(result.output, /FORWARDED:<logs>/);
+  assert.doesNotMatch(result.output, /UNEXPECTED_/);
+});
+
 shellTest("unknown CLI command is rejected without invoking installation", () => {
   const result = shell(`install_assistant() { echo UNEXPECTED_INSTALL; }; main typo`);
   assert.equal(result.status, 1); assert.doesNotMatch(result.output, /UNEXPECTED_INSTALL/);

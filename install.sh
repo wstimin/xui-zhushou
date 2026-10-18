@@ -263,11 +263,21 @@ configure_firewall() {
 
 install_shortcut() {
   local name shortcut_path
+  if [ -f "$TARGET_DIR/scripts/command-shortcuts.mjs" ]; then
+    if node "$TARGET_DIR/scripts/command-shortcuts.mjs" "$TARGET_DIR" "$SHORTCUT_DIR"; then
+      echo -e "${GREEN}[OK] 输入 pa 即可打开管理菜单；旧命令 sy 继续兼容。${NC}"
+      return 0
+    fi
+    echo -e "${YELLOW}[ERROR] 部分快捷命令未修复：同名的其他程序不会被覆盖，请检查上方详情。${NC}"
+    return 1
+  fi
   mkdir -p "$SHORTCUT_DIR"
   for name in pa sy; do
     shortcut_path="$SHORTCUT_DIR/$name"
     if [ -e "$shortcut_path" ] || [ -L "$shortcut_path" ]; then
-      if ! grep -Fq "$TARGET_DIR/install.sh" "$shortcut_path" 2>/dev/null; then
+      if [ -L "$shortcut_path" ] || [ ! -f "$shortcut_path" ] \
+        || ! grep -Fxq '# PanelArk managed shortcut' "$shortcut_path" 2>/dev/null \
+        || ! grep -Fxq "  exec bash \"$TARGET_DIR/install.sh\" \"\$@\"" "$shortcut_path" 2>/dev/null; then
         echo -e "${RED}[ERROR] $shortcut_path 已被其他程序使用，未覆盖。${NC}"
         return 1
       fi
@@ -564,6 +574,7 @@ check_environment() {
 install_assistant() {
   if [ -f "$TARGET_DIR/dist/server.cjs" ] && [ "${INSTALL_MODE:-install}" != update ]; then
     echo "[OK] 已安装 v$(read_installed_version)，不会重复安装。需要更新请使用菜单 [11] 或 update 子命令（pa update）。"
+    install_shortcut || return 1
     pause_if_tty; return 0
   fi
   if ! command -v flock >/dev/null 2>&1; then echo "[ERROR] 缺少 util-linux/flock，无法安全锁定安装任务。"; return 1; fi
@@ -572,7 +583,9 @@ install_assistant() {
   PANELARK_LOCK_HELD=true
   if [ -f "$TARGET_DIR/dist/server.cjs" ]; then
     if [ "${INSTALL_MODE:-install}" != update ] || [ "$(read_installed_version)" = "${EXPECTED_RELEASE_VERSION:-}" ]; then
-      echo "[OK] 当前版本已安装，跳过重复操作。"; return 0
+      echo "[OK] 当前版本已安装，跳过重复操作。"
+      install_shortcut || return 1
+      return 0
     fi
   fi
   echo -e "${CYAN}============================================================${NC}"

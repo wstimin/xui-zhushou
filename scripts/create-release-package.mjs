@@ -37,6 +37,7 @@ for (const file of requiredFiles) {
 
 fs.mkdirSync(path.join(outputDir, "scripts"), { recursive: true });
 fs.copyFileSync(path.join(root, "scripts", "apply-update.mjs"), path.join(outputDir, "scripts", "apply-update.mjs"));
+fs.copyFileSync(path.join(root, "scripts", "command-shortcuts.mjs"), path.join(outputDir, "scripts", "command-shortcuts.mjs"));
 fs.copyFileSync(path.join(root, "scripts", "panel-start.mjs"), path.join(outputDir, "scripts", "panel-start.mjs"));
 fs.cpSync(path.join(root, "deploy"), path.join(outputDir, "deploy"), { recursive: true });
 fs.cpSync(path.join(root, "docs", "deployment"), path.join(outputDir, "docs", "deployment"), { recursive: true });

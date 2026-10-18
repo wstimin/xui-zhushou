@@ -4,6 +4,7 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
+import { repairCommandShortcuts } from './command-shortcuts.mjs';
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -117,6 +118,14 @@ try {
   run("pm2", ["startOrReload", "ecosystem.config.cjs", "--update-env"], target, { APP_VERSION: version });
   if (!await waitForHealth(version, env)) throw new Error("新版本未通过健康检查");
   run("pm2", ["save"], target);
+  if (process.platform === 'linux') {
+    try {
+      const shortcuts = repairCommandShortcuts({ targetDirectory: target });
+      if (shortcuts.conflicts.length || shortcuts.errors.length) writeState({ phase: 'restarting', progress: 96, message: `网站健康检查通过，但部分快捷命令未修复（未覆盖其他程序）：${[...shortcuts.conflicts, ...shortcuts.errors].join('；')}` });
+    } catch (error) {
+      writeState({ phase: 'restarting', progress: 96, message: `网站健康检查通过，快捷命令修复失败：${error.message}。可运行 bash ${path.join(target, 'install.sh')} shortcut 重试。` });
+    }
+  }
   fs.rmSync(rollback, { recursive: true, force: true });
   writeState({ phase: "completed", progress: 100, currentVersion: version, message: `已更新至 v${version}` });
 } catch (error) {

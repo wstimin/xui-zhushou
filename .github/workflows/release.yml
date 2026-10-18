@@ -131,6 +131,7 @@ jobs:
           test -s release/package/node_modules/express/package.json
           test -s release/package/node_modules/sql.js/dist/sql-wasm.wasm
           test -s release/package/scripts/apply-update.mjs
+          test -s release/package/scripts/command-shortcuts.mjs
           test -s release/package/panel.cjs
           test -s release/package/scripts/panel-start.mjs
           test -s release/package/Dockerfile
@@ -152,7 +153,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Fix false missing-signing-key warnings when entering the update page|Distinguish loading failed reads and genuinely missing signing keys|Load security reports independently without delaying version information|Abort stale requests on navigation and add bounded read timeouts|Retest delayed reads navigation theme switching manual updates and automatic page reload"
+          PANELARK_RELEASE_NOTES: "Restore missing pa and sy commands automatically on standalone startup and online updates|Rerunning the installer repairs command entry points without reinstalling packages|Preserve foreign commands symlinks and other installations|Publish managed shortcuts atomically with executable permissions|Test real update directory swaps command execution conflicts and nonfatal repair warnings"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums
