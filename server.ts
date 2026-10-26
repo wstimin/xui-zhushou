@@ -8,13 +8,14 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { buildInbound, InboundInput } from "./server/inbound-builder.js";
 import { buildInstallCommand, connectSsh, execSsh, formatServerInspectionError, inspectServer, SshInput } from "./server/ssh.js";
-import { assertHttpsUrl, cleanHostInput, normalizeWebPath, optionalString, panelPassword, panelUsername, randomToken, validPort } from "./server/validation.js";
-import { findInboundRecord, isRetryablePanelConnectionError, parseApiTokenFromOutput, XuiClient, XuiClientOptions } from "./server/xui-client.js";
+import { cleanHostInput, normalizeWebPath, optionalString, panelPassword, panelUsername, randomToken, validPort } from "./server/validation.js";
+import { findInboundRecord, isRetryablePanelConnectionError, XuiClient, XuiClientOptions } from "./server/xui-client.js";
 import { injectSocksRouting, parseSocksInput } from "./server/xray-template.js";
 import { mountPanelArkApi } from "./server/panelark-api.js";
 import { isAdminPagePath, markAdminHtml, readAdminPath } from "./server/admin-path.js";
 import { installationRequired, webInstallationEnabled } from "./server/setup.js";
 import { ensureStandaloneShortcuts } from "./server/command-shortcuts.js";
+import { officialThreeXUiPolicy, officialThreeXUiReadCommand, officialThreeXUiReadError, parseOfficialThreeXUiResult } from './server/three-xui-install.js';
 
 type ServerInspection = Awaited<ReturnType<typeof inspectServer>>;
 type CachedSshInspection = {
@@ -75,8 +76,6 @@ function takeSshInspection(id: unknown, input: SshInput): ServerInspection | und
   return sameTarget ? cached.details : undefined;
 }
 
-const RECOMMENDED_INSTALLER = "https://raw.githubusercontent.com/wstimin/mogai-3xui/main/install.sh";
-const OFFICIAL_INSTALLER = "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh";
 
 function noStore(_req: Request, res: Response, next: NextFunction) {
   res.setHeader("Cache-Control", "no-store");
@@ -129,18 +128,6 @@ function xuiOptions(body: Record<string, any>, signal?: AbortSignal): XuiClientO
     allowInsecureTls: body.allowInsecureTls === true,
     signal,
   };
-}
-
-function parseInstallerResult(output: string): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const line of output.split(/\r?\n/)) {
-    const match = line.match(/^__XUI_([A-Z_]+)__=(.*)$/);
-    if (match) {
-      const value = match[2].trim();
-      if (value || !(match[1] in values)) values[match[1]] = value;
-    }
-  }
-  return values;
 }
 
 async function startServer() {
@@ -270,14 +257,7 @@ async function startServer() {
       const panelPort = body.panelPort ? validPort(body.panelPort) : 20_000 + Math.floor(Math.random() * 30_000);
       const panelPath = normalizeWebPath(body.panelPath || `/xui_${randomToken(3)}`);
       const domain = cleanHostInput(body.domain);
-      const scriptType = ["recommended", "official", "custom"].includes(body.scriptType)
-        ? body.scriptType
-        : "recommended";
-      const sslMode: "none" | "domain" | "ip" = scriptType === "recommended" || body.autoSSL
-        ? (domain ? "domain" : "ip")
-        : "none";
-      let scriptUrl = scriptType === "official" ? OFFICIAL_INSTALLER : RECOMMENDED_INSTALLER;
-      if (scriptType === "custom") scriptUrl = assertHttpsUrl(optionalString(body.customScriptUrl), "自定义脚本地址");
+      const { scriptType, scriptUrl, sslMode } = officialThreeXUiPolicy({ ...body, domain });
       const username = panelUsername(body.panelUsername, `admin_${randomToken(3)}`);
       const password = panelPassword(body.panelPassword, `Xui_${randomBytes(12).toString("base64url")}`);
 
@@ -299,7 +279,7 @@ async function startServer() {
         if (sudo.code !== 0) throw new Error("当前 SSH 用户不是 root，且没有免密 sudo 权限");
       }
 
-      const scriptLabel = scriptType === "recommended" ? "推荐兼容脚本" : scriptType === "official" ? "官方脚本" : "自定义脚本";
+      const scriptLabel = 'MHSanaei 官方无人值守脚本';
       write({ type: "log", step: 3, message: `[ENV] 环境检查完成，准备执行${scriptLabel}` });
       const command = buildInstallCommand({
         scriptUrl,
@@ -311,12 +291,6 @@ async function startServer() {
         sslMode,
         domain: domain || undefined,
         useSudo: !systemInfo.isRoot,
-        interactiveAnswers: scriptType === "recommended"
-          ? sslMode === "domain"
-            ? ["y", String(panelPort), "1", domain, "", "n", "y"]
-            : ["y", String(panelPort), "2", "", ""]
-          : undefined,
-        configurePanelAfterInstall: true,
       });
       write({ type: "log", step: 4, message: `[INSTALL] 正在执行${scriptLabel}，安装输出已在后端安全收集` });
       const installProgressTimers = [
@@ -341,27 +315,21 @@ async function startServer() {
       }
 
       write({ type: "log", step: 7, message: "[VERIFY] 正在验证服务和读取安装结果" });
-      const sudo = systemInfo.isRoot ? "" : "sudo -n ";
-      const verifyCommand = `${sudo}systemctl is-active x-ui && ${sudo}bash -c 'if [ -r /etc/x-ui/install-result.env ]; then . /etc/x-ui/install-result.env; printf "__XUI_USERNAME__=%s\\n__XUI_PASSWORD__=%s\\n__XUI_PANEL_PORT__=%s\\n__XUI_WEB_BASE_PATH__=%s\\n__XUI_ACCESS_URL__=%s\\n__XUI_API_TOKEN__=%s\\n" "$XUI_USERNAME" "$XUI_PASSWORD" "$XUI_PANEL_PORT" "$XUI_WEB_BASE_PATH" "$XUI_ACCESS_URL" "$XUI_API_TOKEN"; fi; if [ -x /usr/local/x-ui/x-ui ]; then cert_output=$(/usr/local/x-ui/x-ui setting -getCert true 2>/dev/null || true); web_cert=$(printf "%s\\n" "$cert_output" | awk -F": *" "/^[[:space:]]*cert:/{print \\$2; exit}"); web_key=$(printf "%s\\n" "$cert_output" | awk -F": *" "/^[[:space:]]*key:/{print \\$2; exit}"); printf "__XUI_WEB_CERT_FILE__=%s\\n__XUI_WEB_KEY_FILE__=%s\\n" "$web_cert" "$web_key"; fi'`;
+      const verifyCommand = officialThreeXUiReadCommand(!systemInfo.isRoot);
       const verify = await execSsh(session.client, verifyCommand, { timeoutMs: 30_000 });
-      if (verify.code !== 0 || !verify.stdout.startsWith("active")) throw new Error(verify.stderr || "x-ui 服务没有成功启动");
-      const installed = parseInstallerResult(verify.stdout);
-      const installedPort = String(panelPort);
-      const installedPath = panelPath;
-      const recommendedTlsReady = Boolean(installed.WEB_CERT_FILE && installed.WEB_KEY_FILE);
-      const fallbackProtocol = scriptType === "recommended"
-        ? recommendedTlsReady ? "https" : "http"
-        : sslMode === "none" ? "http" : "https";
-      const accessUrl = `${fallbackProtocol}://${domain || host}:${installedPort}${installedPath}`;
+      if (verify.code !== 0) throw new Error(officialThreeXUiReadError(verify.code));
+      const installed = parseOfficialThreeXUiResult(verify.stdout);
 
       write({ type: "log", step: 8, message: "[AUTH] 正在验证面板登录凭证" });
       panelClient = new XuiClient({
-        panelAddress: domain || host,
-        panelPort: installedPort,
-        panelPath: installedPath,
-        panelProtocol: accessUrl.startsWith("https://") ? "https" : "http",
-        panelUser: username,
-        panelPass: password,
+        panelAddress: installed.host,
+        panelPort: installed.port,
+        panelPath: installed.path,
+        panelProtocol: installed.protocol,
+        panelUser: installed.username,
+        panelPass: installed.password,
+        panelToken: installed.apiToken,
+        panelFlavor: 'official',
         allowInsecureTls: true,
       });
       let panelAuthError: unknown;
@@ -380,40 +348,15 @@ async function startServer() {
         throw new Error(`面板服务已启动，但安装后登录凭证验证失败：${errorMessage(panelAuthError)}`);
       }
 
-      let apiToken = installed.API_TOKEN || parseApiTokenFromOutput(`${install.stdout}\n${install.stderr}`) || undefined;
-      if (apiToken) {
-        write({ type: "log", step: 8, message: "[TOKEN] 登录凭证已验证，并已从安装结果中提取面板 API Token" });
-      }
-      if (!apiToken) {
-        write({ type: "log", step: 8, message: "[TOKEN] 正在读取节点创建所需的 API Token" });
-        try {
-          apiToken = await panelClient.getApiToken();
-        } catch (error) {
-          throw new Error(`面板已安装，但未能读取创建节点所需的 API Token：${errorMessage(error)}`);
-        }
-        write({ type: "log", step: 8, message: "[TOKEN] API Token 已读取并将自动带入节点页面" });
-      }
+      await panelClient.listInbounds();
+      write({ type: 'log', step: 8, message: '[TOKEN] 官方安装结果的登录信息与 API Token 已验证' });
 
       const result = {
         id: `panel-${Date.now()}`,
         createdAt: new Date().toLocaleString("zh-CN"),
-        accessUrl,
-        protocol: accessUrl.startsWith("https://") ? "https" : "http",
-        host: domain || host,
-        port: installedPort,
-        path: installedPath,
-        username,
-        password,
-        apiToken,
-        webCertFile: installed.WEB_CERT_FILE || undefined,
-        webKeyFile: installed.WEB_KEY_FILE || undefined,
-        sslEnabled: accessUrl.startsWith("https://"),
+        ...installed,
         scriptType,
-        panelFlavor: scriptType === "recommended"
-          ? "mogai"
-          : scriptType === "official"
-            ? "official"
-            : "compatible",
+        panelFlavor: 'official',
         systemInfo,
       };
       write({ type: "log", step: 9, message: "[SUCCESS] 3x-ui 服务已启动，安装结果验证通过" });

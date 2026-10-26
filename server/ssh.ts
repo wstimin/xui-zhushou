@@ -77,8 +77,6 @@ export function buildInstallCommand(params: {
   sslMode: "none" | "domain" | "ip";
   domain?: string;
   useSudo: boolean;
-  interactiveAnswers?: string[];
-  configurePanelAfterInstall?: boolean;
 }): string {
   const env: Record<string, string> = {
     XUI_NONINTERACTIVE: "1",
@@ -96,33 +94,13 @@ export function buildInstallCommand(params: {
   const assignments = Object.entries(env)
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ");
-  const installer = params.interactiveAnswers
-    ? [
-        "installer=$(mktemp)",
-        "trap 'rm -f \"$installer\"' EXIT",
-        `curl -fLsS ${shellQuote(params.scriptUrl)} -o "$installer"`,
-        `printf '%s\\n' ${params.interactiveAnswers.map(shellQuote).join(" ")} | bash "$installer"`,
-      ].join(" && ")
-    : `curl -fLsS ${shellQuote(params.scriptUrl)} | bash`;
-  const panelPath = params.webBasePath.replace(/^\/+|\/+$/g, "");
-  const configurePanel = params.configurePanelAfterInstall
-    ? [
-        "test -x /usr/local/x-ui/x-ui",
-        "&& setting_output=$(/usr/local/x-ui/x-ui setting",
-        `-username ${shellQuote(params.username)}`,
-        `-password ${shellQuote(params.password)}`,
-        `-port ${shellQuote(String(params.panelPort))}`,
-        `-webBasePath ${shellQuote(panelPath)}`,
-        "2>&1)",
-        "&& printf '%s\\n' \"$setting_output\"",
-        "&& printf '%s\\n' \"$setting_output\" | grep -q 'Username and password updated successfully'",
-        "&& printf '%s\\n' \"$setting_output\" | grep -q 'Port set successfully:'",
-        "&& printf '%s\\n' \"$setting_output\" | grep -q 'Base URI path set successfully'",
-        "&& systemctl restart x-ui",
-      ].join(" ")
-    : "";
-  const script = configurePanel ? `${installer} && ${configurePanel}` : installer;
-  return `${params.useSudo ? "sudo -n " : ""}env ${assignments} bash -c ${shellQuote(script)}`;
+  const installer = [
+    "installer=$(mktemp)",
+    "trap 'rm -f \"$installer\"' EXIT",
+    `curl -fLsS --retry 2 --connect-timeout 15 ${shellQuote(params.scriptUrl)} -o "$installer"`,
+    'bash "$installer" </dev/null',
+  ].join(' && ');
+  return `${params.useSudo ? "sudo -n " : ""}env ${assignments} bash -e -o pipefail -c ${shellQuote(installer)}`;
 }
 
 export async function connectSsh(

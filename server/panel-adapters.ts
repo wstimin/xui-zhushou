@@ -11,13 +11,13 @@ import {
 import {
   findInboundRecord,
   isRetryablePanelConnectionError,
-  parseApiTokenFromOutput,
   XuiClient,
   XuiClientOptions,
 } from "./xui-client.js";
 import { injectSocksRouting, parseSocksInput } from "./xray-template.js";
 import { cleanHostInput, normalizeWebPath, optionalString, panelPassword, panelUsername, randomToken, validPort } from "./validation.js";
 import type { JobExecutionContext } from "./panelark-jobs.js";
+import { officialThreeXUiPolicy, officialThreeXUiReadCommand, officialThreeXUiReadError, parseOfficialThreeXUiResult } from './three-xui-install.js';
 
 export type PanelAdapterOperation = "install" | "create-node" | "get-tls";
 
@@ -76,20 +76,9 @@ export interface ThreeXUiAdapterDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
-const RECOMMENDED_INSTALLER = "https://raw.githubusercontent.com/wstimin/mogai-3xui/main/install.sh";
-const OFFICIAL_INSTALLER = "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh";
 
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
 function sleep(milliseconds: number) { return new Promise<void>(resolve => setTimeout(resolve, milliseconds)); }
-
-function parseInstallerResult(output: string): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const line of output.split(/\r?\n/)) {
-    const match = line.match(/^__XUI_([A-Z_]+)__=(.*)$/);
-    if (match) values[match[1]] = match[2].trim();
-  }
-  return values;
-}
 
 function adapterSteps(operation: PanelAdapterOperation) {
   return operation === "install"
@@ -116,7 +105,7 @@ export const threeXUiMetadata: PanelAdapterMetadata = {
   version: "1",
   memory: "512 MB+",
   port: "自动生成",
-  description: "PanelArk 官方 3x-ui 适配器，负责面板安装、真实验证、节点和 SOCKS 路由。",
+  description: "使用 MHSanaei 官方脚本安装 3x-ui，读取官方安装结果并验证登录与 API Token。",
   enabled: true,
   supportLevel: "pending",
   supportedSystems: ["Ubuntu 20.04+", "Debian 11+", "CentOS/Rocky/Alma 8+"],
@@ -124,7 +113,7 @@ export const threeXUiMetadata: PanelAdapterMetadata = {
   capabilities: ["ssh-install", "api-token", "tls-certificates", "vless", "vmess", "trojan", "shadowsocks", "reality", "socks-routing"],
   requirements: { os: ["linux"], minRamMb: 512, systemd: true, network: true },
   form: [
-    { key: "scriptType", label: "安装脚本", type: "select", options: [{ label: "推荐兼容脚本", value: "recommended" }, { label: "官方脚本", value: "official" }, { label: "自定义 HTTPS 脚本", value: "custom" }] },
+    { key: "scriptType", label: "安装脚本", type: "select", options: [{ label: "MHSanaei 官方脚本", value: "official" }] },
     { key: "panelPort", label: "面板端口", type: "number", required: true },
     { key: "panelPath", label: "面板路径", type: "text", required: true },
     { key: "panelUsername", label: "管理员用户名", type: "text", required: true },
@@ -190,10 +179,7 @@ class ThreeXUiAdapter implements PanelAdapter {
     const panelPort = body.panelPort || body.servicePort ? validPort(body.panelPort || body.servicePort) : 20_000 + Math.floor(Math.random() * 30_000);
     const panelPath = normalizeWebPath(body.panelPath || `/xui_${randomToken(3)}`);
     const domain = cleanHostInput(body.domain);
-    const scriptType = ["recommended", "official", "custom"].includes(body.scriptType) ? body.scriptType : "recommended";
-    const sslMode: "none" | "domain" | "ip" = scriptType === "recommended" || body.autoSSL ? (domain ? "domain" : "ip") : "none";
-    const scriptUrl = scriptType === "official" ? OFFICIAL_INSTALLER : scriptType === "custom" ? String(body.customScriptUrl || "") : RECOMMENDED_INSTALLER;
-    if (scriptType === "custom" && !/^https:\/\//i.test(scriptUrl)) throw new Error("自定义脚本地址必须使用 HTTPS");
+    const { scriptType, sslMode, scriptUrl } = officialThreeXUiPolicy({ ...body, domain });
     const username = panelUsername(body.panelUsername, `admin_${randomToken(3)}`);
     const password = panelPassword(body.panelPassword, `Xui_${randomBytes(12).toString("base64url")}`);
     const ownsSession = !body.sshSession;
@@ -212,55 +198,39 @@ class ThreeXUiAdapter implements PanelAdapter {
         context.progress(20, `[OS] ${info.osName} / ${info.arch}`);
         return info;
       });
-      const install = await context.step("install", async () => {
+      await context.step("install", async () => {
         if (!session) throw new Error("SSH 会话未建立");
         const command = buildInstallCommand({
           scriptUrl, username, password, panelPort, webBasePath: panelPath, serverIp: host, sslMode,
           domain: domain || undefined, useSudo: !systemInfo.isRoot,
-          interactiveAnswers: scriptType === "recommended" ? sslMode === "domain" ? ["y", String(panelPort), "1", domain, "", "n", "y"] : ["y", String(panelPort), "2", "", ""] : undefined,
-          configurePanelAfterInstall: true,
         });
-        context.log("[INSTALL] 正在执行适配器安装脚本");
+        context.log("[INSTALL] 正在执行 MHSanaei 官方无人值守安装脚本");
         const result = await exec(session.client, command, { timeoutMs: 20 * 60_000 });
         if (result.code !== 0) throw new Error(`3x-ui 安装脚本退出码 ${result.code}`);
-        return result;
       });
       const verified = await context.step("verify", async () => {
         if (!session) throw new Error("SSH 会话未建立");
-        const sudo = systemInfo.isRoot ? "" : "sudo -n ";
-        const verifyCommand = `${sudo}systemctl is-active x-ui && ${sudo}bash -c 'if [ -r /etc/x-ui/install-result.env ]; then . /etc/x-ui/install-result.env; printf "__XUI_USERNAME__=%s\\n__XUI_PASSWORD__=%s\\n__XUI_PANEL_PORT__=%s\\n__XUI_WEB_BASE_PATH__=%s\\n__XUI_ACCESS_URL__=%s\\n__XUI_API_TOKEN__=%s\\n" "$XUI_USERNAME" "$XUI_PASSWORD" "$XUI_PANEL_PORT" "$XUI_WEB_BASE_PATH" "$XUI_ACCESS_URL" "$XUI_API_TOKEN"; fi'`;
+        const verifyCommand = officialThreeXUiReadCommand(!systemInfo.isRoot);
         const verify = await exec(session.client, verifyCommand, { timeoutMs: 30_000 });
-        if (verify.code !== 0 || !verify.stdout.startsWith("active")) throw new Error(verify.stderr || "x-ui 服务没有成功启动");
-        const installed = parseInstallerResult(verify.stdout);
-        const protocol = installed.ACCESS_URL?.startsWith("https://") || (sslMode !== "none" && Boolean(domain)) ? "https" : "http";
-        const accessUrl = installed.ACCESS_URL || `${protocol}://${domain || host}:${installed.PANEL_PORT || panelPort}${installed.WEB_BASE_PATH || panelPath}`;
-        client = makeClient({ panelAddress: domain || host, panelPort: installed.PANEL_PORT || panelPort, panelPath: installed.WEB_BASE_PATH || panelPath, panelProtocol: accessUrl.startsWith("https://") ? "https" : "http", panelUser: username, panelPass: password, allowInsecureTls: true });
+        if (verify.code !== 0) throw new Error(officialThreeXUiReadError(verify.code));
+        const installed = parseOfficialThreeXUiResult(verify.stdout);
+        client = makeClient({ panelAddress: installed.host, panelPort: installed.port, panelPath: installed.path, panelProtocol: installed.protocol, panelUser: installed.username, panelPass: installed.password, panelToken: installed.apiToken, panelFlavor: 'official', allowInsecureTls: true });
         let authError: unknown;
         for (let attempt = 1; attempt <= 3; attempt += 1) {
           try { await client.authenticate(); authError = undefined; break; } catch (error) { authError = error; if (attempt < 3) await wait(attempt * 50); }
         }
         if (authError) throw new Error(`面板服务已启动，但安装后登录凭证验证失败：${message(authError)}`);
-        const apiToken = installed.API_TOKEN || parseApiTokenFromOutput(`${install.stdout}\n${install.stderr}`) || await client.getApiToken();
+        await client.listInbounds();
         context.progress(85, "3x-ui 登录和 API Token 验证通过");
-        return { installed, accessUrl, apiToken, systemInfo, protocol };
+        return { installed, systemInfo };
       });
       return await context.step("result", async () => ({
         adapterId: this.metadata.id,
         id: `panel-${randomUUID()}`,
         createdAt: new Date().toISOString(),
-        accessUrl: verified.accessUrl,
-        protocol: verified.protocol,
-        host: domain || host,
-        port: String(verified.installed.PANEL_PORT || panelPort),
-        path: verified.installed.WEB_BASE_PATH || panelPath,
-        username,
-        password,
-        apiToken: verified.apiToken,
-        webCertFile: verified.installed.WEB_CERT_FILE || undefined,
-        webKeyFile: verified.installed.WEB_KEY_FILE || undefined,
-        sslEnabled: verified.accessUrl.startsWith("https://"),
+        ...verified.installed,
         scriptType,
-        panelFlavor: scriptType === "recommended" ? "mogai" : scriptType === "official" ? "official" : "compatible",
+        panelFlavor: 'official',
         systemInfo: verified.systemInfo,
       }));
     } finally {

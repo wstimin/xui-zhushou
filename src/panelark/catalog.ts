@@ -48,7 +48,7 @@ export const panels: CatalogItem[] = [
   },
   {
     id: '3x-ui', adapterId: '3x-ui', name: '3x-ui', category: '代理面板', icon: Network, accent: 'blue',
-    description: 'Xray 多协议面板，安装后可继续创建节点、订阅与二维码。',
+    description: '使用 MHSanaei 官方脚本安装，读取实际登录信息并验证后返回。',
     version: 'Official', memory: '512 MB+', port: '自动生成', featured: true, kind: 'panel',
   },
   {

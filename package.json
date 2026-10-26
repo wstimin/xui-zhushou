@@ -1,7 +1,7 @@
 {
   "name": "xui-zhushou",
   "private": true,
-  "version": "2.6.2",
+  "version": "2.6.3",
   "description": "PanelArk 面板方舟：面向多种 VPS 面板与工具的一键部署助手",
   "type": "module",
   "engines": {
@@ -15,7 +15,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "package:release": "node scripts/create-release-package.mjs",
     "lint": "tsc --noEmit",
-    "test": "tsx --test server/command-shortcuts.test.ts server/update-shortcuts.test.ts server/update-loading-page.test.tsx server/admin-layout.test.tsx server/admin-acceptance.test.tsx server/admin-management.test.ts server/admin-management-ui.test.tsx server/update-refresh-page.test.ts server/update-refresh.test.ts server/automatic-accounts.test.ts server/automatic-deployment.test.ts server/automatic-ui.test.tsx server/cdk-management.test.ts server/cdk-management-ui.test.tsx server/admin-interactions.test.tsx server/ui-regression.test.tsx server/panelark-provision.test.ts server/setup.test.ts server/admin-path.test.ts server/install-script.test.ts server/inbound-builder.test.ts server/panel-adapters.test.ts server/catalog-adapters.test.ts server/panelark-api.test.ts server/panelark-backup.test.ts server/panelark-update.test.ts server/panelark-jobs.test.ts server/panelark-remote.test.ts server/panelark-remote-api.test.ts server/ssh.test.ts server/validation.test.ts server/xray-template.test.ts server/xui-client.test.ts"
+    "test": "tsx --test server/three-xui-install.test.ts server/command-shortcuts.test.ts server/update-shortcuts.test.ts server/update-loading-page.test.tsx server/admin-layout.test.tsx server/admin-acceptance.test.tsx server/admin-management.test.ts server/admin-management-ui.test.tsx server/update-refresh-page.test.ts server/update-refresh.test.ts server/automatic-accounts.test.ts server/automatic-deployment.test.ts server/automatic-ui.test.tsx server/cdk-management.test.ts server/cdk-management-ui.test.tsx server/admin-interactions.test.tsx server/ui-regression.test.tsx server/panelark-provision.test.ts server/setup.test.ts server/admin-path.test.ts server/install-script.test.ts server/inbound-builder.test.ts server/panel-adapters.test.ts server/catalog-adapters.test.ts server/panelark-api.test.ts server/panelark-backup.test.ts server/panelark-update.test.ts server/panelark-jobs.test.ts server/panelark-remote.test.ts server/panelark-remote-api.test.ts server/ssh.test.ts server/validation.test.ts server/xray-template.test.ts server/xui-client.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

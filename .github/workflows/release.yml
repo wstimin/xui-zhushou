@@ -153,7 +153,7 @@ jobs:
         env:
           PANELARK_RELEASE_PRIVATE_KEY: ${{ secrets.PANELARK_RELEASE_PRIVATE_KEY }}
           PANELARK_RELEASE_CHANNEL: stable
-          PANELARK_RELEASE_NOTES: "Restore missing pa and sy commands automatically on standalone startup and online updates|Rerunning the installer repairs command entry points without reinstalling packages|Preserve foreign commands symlinks and other installations|Publish managed shortcuts atomically with executable permissions|Test real update directory swaps command execution conflicts and nonfatal repair warnings"
+          PANELARK_RELEASE_NOTES: "Use only the official MHSanaei 3x-ui unattended installer|Read real credentials from the official install-result.env instead of guessing|Cross-check current port path and TLS through the official CLI|Verify real login and bearer token before delivering installation success|Preserve special characters and fail clearly on missing or stale official results"
         run: node scripts/sign-release.mjs
 
       - name: Create checksums

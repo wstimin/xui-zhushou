@@ -2,7 +2,7 @@ export type ViewMode = 'home' | 'panel' | 'node';
 
 export type AuthType = 'password' | 'privateKey';
 
-export type ScriptType = 'recommended' | 'official' | 'custom';
+export type ScriptType = 'official';
 
 export type PanelFlavor = 'mogai' | 'official' | 'compatible';
 
@@ -27,7 +27,6 @@ export interface PanelDeployForm {
   domain?: string;
   autoSSL: boolean;
   scriptType?: ScriptType;
-  customScriptUrl?: string;
   sshSessionId?: string;
 }
 

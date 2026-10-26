@@ -1,6 +1,6 @@
 # PanelArk
 
-当前发布版本：v2.6.2。
+当前发布版本：v2.6.3。
 
 PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平台，已完成真实 CDK 商业授权、安全 SSH 预检、持久化任务引擎、多面板适配器、运营后台、加密迁移和签名在线更新闭环。
 
@@ -25,6 +25,7 @@ PanelArk（面板方舟）是面向多种 VPS 面板与工具的一键部署平�
 - 后台采用紧凑工作台布局：CDK／套餐／批次分标签管理，新增表单按需弹出，次要行操作收纳在“更多”菜单；暖黑金色与亮色主题、原有字号和管理权限保持不变。参见 [v2.6.0 布局说明](docs/panelark/RELEASE_2.6.0.md)。
 - 系统更新页切换时先显示“读取中”，不再误报签名公钥未配置；安全基线检查独立加载，请求失败可刷新重试。参见 [v2.6.1 修复说明](docs/panelark/RELEASE_2.6.1.md)。
 - 独立部署启动和在线更新后自动检查 `pa / sy` 快捷入口；重复运行安装命令也只修复入口，不重复安装。参见 [v2.6.2 修复说明](docs/panelark/RELEASE_2.6.2.md)。
+- 3x-ui 统一使用 MHSanaei 官方脚本，读取官方安装结果及当前配置，验证真实登录和 Token 后才返回成功。参见 [v2.6.3 修复说明](docs/panelark/RELEASE_2.6.3.md)。
 
 - 用户端地址：`http://服务器IP:1888/`
 - 管理后台默认地址：`http://服务器IP:1888/admin`；超级管理员可在“站点配置”修改路径，保存后旧路径立即失效并自动跳转到新地址。
@@ -145,7 +146,7 @@ pa status
 curl -s http://127.0.0.1:1888/api/health
 ```
 
-`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.6.2`。
+`VERSION` 与健康检查返回的 `version` 应一致。当前整体版本为 `2.6.3`。
 
 后台“检测更新”只验证签名清单并显示版本、说明，不下载、不安装、不重启。发现新版本后，手动点击“下载并安装更新”并在站内居中弹窗确认一次，系统会使用本机托管密钥创建更新前快照，再连续完成下载、校验、切换、重启、健康检查和失败回滚，不要求输入更新密码。正式发布包内置锁定的生产依赖，避免在线更新再次等待 npm 下载；旧发布包缺少依赖时仍会限时补齐。生产安装需保留 systemd、PM2 与 Node.js 24 LTS 的可用性。v2.2.6 及更早版本若旧后台停在 50% 或更新无进展，可先在 SSH 终端运行 `pa update` 升级到新版流程。
 
@@ -176,23 +177,26 @@ adapter-catalog.json
 这里有两个不同用途的 `install.sh`，不要混淆：
 
 - `xui-zhushou/install.sh`：安装和管理本 Web 助手。
-- `mogai-3xui/install.sh`：本助手默认用于远程安装 3x-ui 面板。
+- `MHSanaei/3x-ui/install.sh`：用于远程安装 3x-ui 面板。
 
-助手默认并推荐使用基于官方 2.9.4 修改 UI、客户端兼容范围更广的脚本：
+3x-ui 仅使用 [MHSanaei 官方安装脚本](https://github.com/MHSanaei/3x-ui/wiki/Installation)：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/wstimin/mogai-3xui/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh)
 ```
 
-界面中仍可单独选择官方脚本：
+PanelArk 自动安装使用官方 `XUI_NONINTERACTIVE=1` 和安装参数环境变量，不再发送旧魔改脚本的交互答案，也不再提供魔改或自定义安装源。旧客户端的 `recommended` 请求兼容映射到官方脚本。
 
-```text
-https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh
-```
+登录信息按官方方式读取：
 
-两套脚本使用独立的安装逻辑。官方脚本使用其无人值守环境变量；推荐脚本按实际交互顺序自动回答端口和 TLS 选项。安装完成后，两种脚本都会通过官方 `x-ui setting` 命令写入用户填写的用户名、密码、端口和 Web 路径，并在命令返回成功后重启服务。推荐脚本优先适配更多客户端。该脚本安装时要求配置 TLS：有域名使用域名证书，无域名使用 IP 证书。后端读取面板的实际证书状态、证书路径和 API Token；没有现成 Token 时会在安装完成后读取一次。安装成功弹窗显示本次任务实际返回的访问地址、账号密码与 Token；自动安装的敏感交付结果只通过当前页面内存凭证返回，CDK 核销不会清除；结果不会自动关闭，支持复制和下载。刷新或离开页面后不可重新查看，手动关闭时清除服务端结果；任务历史不保存完整交付凭据。
+- 通过 SSH 读取官方生成的 `/etc/x-ui/install-result.env`，由 Bash 解析官方 `%q` 转义；保留密码中的引号、空格等特殊字符。
+- 使用 `/usr/local/x-ui/x-ui setting -show` 查询实际端口与路径，`setting -getCert` 查询实际证书状态。不是根据预设参数或是否填写域名猜测 HTTP／HTTPS。
+- 优先使用官方结果中的 API Token；缺失时才调用官方 `setting -getApiToken`。不依赖旧版管理接口获取 Token。
+- 实际验证账号密码登录，并用 Token 读取入站列表。结果缺失、配置不一致或验证失败时明确报错，提示在目标服务器运行 `x-ui` 检查，不会拼出虚假的成功结果或自动重置已有账号。
 
-自定义 3x-ui 安装脚本只接受 HTTPS URL。非 root SSH 用户必须具备 `sudo -n` 免密 sudo 权限。
+安装成功弹窗显示实际读取的访问地址、账号密码与 Token。敏感结果只通过当前页面内存凭证返回，结果不自动关闭，支持复制和下载。刷新或离开页面后不可重新查看，手动关闭时清除服务端结果；任务历史不保存完整交付凭据。
+
+非 root SSH 用户必须具备 `sudo -n` 免密 sudo 权限。
 
 ## 节点与鉴权
 

@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createThreeXUiAdapter, getPanelAdapter, listPanelAdapters } from "./panel-adapters.js";
 
+const officialResult = (changes: Record<string, string> = {}) => Object.entries({
+  USERNAME: 'actual-owner', PASSWORD: 'actual password', API_TOKEN: 'actual-token', PANEL_PORT: '2053', WEB_BASE_PATH: '/actual/', ACCESS_URL: 'https://198.51.100.10:2053/actual/',
+  SETTINGS: 'port: 2053\nwebBasePath: /actual/\n', CERTS: 'cert: /root/cert/fullchain.pem\nkey: /root/cert/key.pem\n', ...changes,
+}).map(([key, value]) => `__XUI_OFFICIAL_${key}__=${Buffer.from(value).toString('base64')}`).join('\n');
+
 function context(payload: Record<string, any>) {
   const events: string[] = [];
   const state = { events, progress: 0 };
@@ -33,7 +38,7 @@ test("3x-ui install adapter performs service and credential verification", async
   const calls: string[] = [];
   const fakeClient = {
     async authenticate() { calls.push("authenticate"); },
-    async getApiToken() { calls.push("token"); return "api-token"; },
+    async listInbounds() { calls.push('token-verified'); return []; },
     async close() { calls.push("close"); },
   } as any;
   const adapter = createThreeXUiAdapter({
@@ -41,19 +46,41 @@ test("3x-ui install adapter performs service and credential verification", async
     inspect: async () => ({ targetHost: "198.51.100.10", osName: "Ubuntu", arch: "x86_64", status: "compatible", isRoot: true }) as any,
     exec: async (_client, command) => {
       calls.push(command.includes("systemctl is-active") ? "verify" : "install");
-      return command.includes("systemctl is-active")
-        ? { stdout: "active\n__XUI_PANEL_PORT__=2053\n__XUI_WEB_BASE_PATH__=xui\n__XUI_ACCESS_URL__=https://198.51.100.10:2053/xui\n", stderr: "", code: 0 }
-        : { stdout: "installed", stderr: "", code: 0 };
+      if (!command.includes('systemctl is-active')) { assert.match(command, /MHSanaei\/3x-ui\/master\/install\.sh/); assert.doesNotMatch(command, /mogai|x-ui setting|grep -q/); }
+      return command.includes("systemctl is-active") ? { stdout: officialResult(), stderr: '', code: 0 } : { stdout: 'installed', stderr: '', code: 0 };
     },
-    client: () => fakeClient,
+    client: options => { assert.equal(options.panelUser, 'actual-owner'); assert.equal(options.panelPass, 'actual password'); assert.equal(options.panelToken, 'actual-token'); assert.equal(options.panelPath, '/actual/'); assert.equal(options.panelFlavor, 'official'); return fakeClient; },
     sleep: async () => undefined,
   });
   const result = await adapter.execute("install", context({ ipOrDomain: "198.51.100.10", sshUser: "root", sshPassword: "secret", scriptType: "official" }) as any) as any;
   assert.equal(result.adapterId, "3x-ui");
-  assert.equal(result.accessUrl, "https://198.51.100.10:2053/xui");
-  assert.equal(result.apiToken, "api-token");
-  assert.deepEqual(calls, ["install", "verify", "authenticate", "token", "close"]);
+  assert.equal(result.accessUrl, 'https://198.51.100.10:2053/actual/');
+  assert.equal(result.username, 'actual-owner'); assert.equal(result.password, 'actual password');
+  assert.equal(result.apiToken, 'actual-token'); assert.equal(result.panelFlavor, 'official');
+  assert.deepEqual(calls, ['install', 'verify', 'authenticate', 'token-verified', 'close']);
 });
+
+test('3x-ui defaults and legacy recommended requests both use official scripts; missing official delivery fails, never guesses', async () => {
+  for (const scriptType of [undefined, 'recommended', 'official']) {
+    let installs = 0, clients = 0;
+    const adapter = createThreeXUiAdapter({
+      connect: async () => ({ client: { end() {} }, host: '198.51.100.10' }) as any,
+      inspect: async () => ({ status: 'compatible', isRoot: true }) as any,
+      exec: async (_client, command) => {
+        if (command.includes('systemctl is-active')) return { code: 0, stdout: officialResult({ PASSWORD: '' }), stderr: '' };
+        installs++; assert.match(command, /MHSanaei\/3x-ui\/master\/install\.sh/); assert.doesNotMatch(command, /mogai|printf.*y/);
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      client: () => { clients++; throw new Error('must not use guessed credentials'); },
+    });
+    await assert.rejects(adapter.execute('install', context({ ipOrDomain: '198.51.100.10', scriptType, panelUsername: 'guessed', panelPassword: 'guessed' })), /官方安装结果/);
+    assert.equal(installs, 1); assert.equal(clients, 0);
+  }
+  const adapter = createThreeXUiAdapter({ connect: async () => { throw new Error('must not connect'); } });
+  await assert.rejects(adapter.execute('install', context({ ipOrDomain: '198.51.100.10', scriptType: 'custom', customScriptUrl: 'https://example.test/fork.sh' })), /仅使用.*官方/);
+  assert.deepEqual(threeXUiScriptOptions(), ['official']);
+});
+function threeXUiScriptOptions() { return getPanelAdapter('3x-ui')!.metadata.form.find(field => field.key === 'scriptType')!.options!.map(option => option.value); }
 
 test("3x-ui node creation is a separate operation and rolls back a failed route", async () => {
   let deleted = 0;

@@ -55,9 +55,9 @@ test("buildInstallCommand uses official noninteractive environment", () => {
   assert.doesNotMatch(command, /p@ss'word/);
 });
 
-test("buildInstallCommand drives and configures the interactive recommended installer", () => {
+test("official installer is downloaded first and runs without any interactive answer stream", () => {
   const command = buildInstallCommand({
-    scriptUrl: "https://raw.githubusercontent.com/wstimin/mogai-3xui/main/install.sh",
+    scriptUrl: "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh",
     username: "admin_test",
     password: "secret'value",
     panelPort: 2053,
@@ -65,24 +65,23 @@ test("buildInstallCommand drives and configures the interactive recommended inst
     serverIp: "panel.example.com",
     sslMode: "none",
     useSudo: false,
-    interactiveAnswers: ["y", "2053", "2", "", ""],
-    configurePanelAfterInstall: true,
   });
 
-  assert.match(command, /wstimin\/mogai-3xui\/main\/install\.sh/);
+  assert.match(command, /MHSanaei\/3x-ui\/master\/install\.sh/);
   assert.match(command, /installer=\$\(mktemp\)/);
-  assert.match(command, /printf/);
+  assert.match(command, /<\/dev\/null/);
+  assert.match(command, /bash -e -o pipefail -c/);
+  assert.doesNotMatch(command, /mogai|interactiveAnswers|x-ui setting|grep -q|\| bash/);
   assert.match(command, /2053/);
-  assert.match(command, /\/usr\/local\/x-ui\/x-ui setting/);
-  assert.match(command, /-username/);
+  assert.match(command, /XUI_USERNAME=/);
   assert.match(command, /admin_test/);
-  assert.match(command, /-webBasePath/);
+  assert.match(command, /XUI_WEB_BASE_PATH=/);
   assert.match(command, /xui-test/);
   assert.doesNotMatch(command, /-s --/);
   assert.doesNotMatch(command, /secret'value/);
 });
 
-test("buildInstallCommand applies final panel credentials through the official x-ui command", () => {
+test("buildInstallCommand passes credentials through official environment variables without overwriting official results", () => {
   const command = buildInstallCommand({
     scriptUrl: "https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh",
     username: "owner@example.com",
@@ -92,15 +91,11 @@ test("buildInstallCommand applies final panel credentials through the official x
     serverIp: "203.0.113.10",
     sslMode: "none",
     useSudo: true,
-    configurePanelAfterInstall: true,
   });
 
   assert.match(command, /^sudo -n env /);
-  assert.match(command, /test -x \/usr\/local\/x-ui\/x-ui/);
-  assert.match(command, /Username and password updated successfully/);
-  assert.match(command, /Port set successfully:/);
-  assert.match(command, /Base URI path set successfully/);
-  assert.match(command, /systemctl restart x-ui/);
+  assert.match(command, /XUI_PASSWORD=/); assert.match(command, /XUI_PANEL_PORT='54321'/);
+  assert.doesNotMatch(command, /x-ui setting|grep -q|systemctl restart/);
   assert.match(command, /owner@example\.com/);
   assert.match(command, /private-panel/);
   assert.doesNotMatch(command, /safe password ' value/);

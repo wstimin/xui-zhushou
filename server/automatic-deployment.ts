@@ -71,7 +71,7 @@ export async function executeAutomaticDeployment(adapter: PanelAdapter, payload:
       if (!configurable || attempt === 29) throw new Error(`端口 ${occupied.map(item => item.port).join('、')} 已被现有服务占用；未停止原服务，请迁移冲突服务或使用干净服务器重试`);
       main = randomInt(20000, 50000);
     }
-    if (configurable) { payload.servicePort = main; if (adapter.metadata.id === '3x-ui') { payload.panelPort = main; payload.autoSSL = true; payload.scriptType = 'recommended'; } }
+    if (configurable) { payload.servicePort = main; if (adapter.metadata.id === '3x-ui') { payload.panelPort = main; payload.autoSSL = true; payload.scriptType = 'official'; } }
     ports = [...new Set([...ports, ...callbacks, ...(adapter.metadata.id === '3x-ui' ? [80, 443] : [])])];
     const fixed = [...callbacks, ...(adapter.metadata.id === '3x-ui' ? [80, 443] : [])];
     if (fixed.length) {

@@ -263,7 +263,8 @@ export class XuiClient {
   private async authenticateSession(): Promise<void> {
     if (this.sessionAuthenticated) return;
     const username = requiredString(this.options.panelUser, "面板用户名");
-    const password = requiredString(this.options.panelPass, "面板密码");
+    const password = this.options.panelPass;
+    if (typeof password !== 'string' || !password.length) throw new Error('面板密码不能为空');
 
     await this.bootstrapCsrfToken();
     const login = () => {

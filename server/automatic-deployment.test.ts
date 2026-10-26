@@ -40,6 +40,17 @@ test('automatic installation allocates free ports, installs missing dependencies
   assert.ok(commands.every(command => !/systemctl stop|docker rm|rm -rf/.test(command)));
 });
 
+test('automatic 3x-ui requests always select the official unattended installer', async () => {
+  const payload: Record<string, any> = { sshSession: session, scriptType: 'recommended' };
+  let installed = false;
+  const adapter: PanelAdapter = { metadata: threeXUiMetadata, execute: async (_operation, ctx) => {
+    installed = true; assert.equal(ctx.payload.scriptType, 'official'); assert.equal(ctx.payload.autoSSL, true);
+    return { scriptType: ctx.payload.scriptType };
+  } };
+  await executeAutomaticDeployment(adapter, payload, context(payload), { inspect: async () => environment as any, sudo: async () => true, exec: async (_client, command) => ({ code: 0, stdout: command.includes('__DEP_') ? dependencies : command.includes('__FIREWALL__') ? '__FIREWALL__=none\n__FIREWALL_ACTIVE__=no' : '', stderr: '' }) });
+  assert.equal(installed, true);
+});
+
 test('automatic installation rejects fixed-port conflicts and unsupported hosts without stopping services', async () => {
   let installed = false;
   const adapter: PanelAdapter = { metadata: { ...threeXUiMetadata, id: 'fixed-panel', port: '80' }, execute: async () => { installed = true; return {}; } };
